@@ -98,7 +98,8 @@ function height(e: Expression) : int
 }
 
 function vars(e: Expression) : set<Variable>
-    decreases e
+    requires valid(e)
+    decreases e, height(e)
 {
     match e {
         case Constant(b) => {}
@@ -112,6 +113,7 @@ function vars(e: Expression) : set<Variable>
 }
 
 function eval(e: Expression, vs: map<Variable,bool>) : bool
+    requires valid(e)
     requires vs.Keys >= vars(e)
     decreases e
 {
@@ -122,37 +124,71 @@ function eval(e: Expression, vs: map<Variable,bool>) : bool
         case And(ands) => forall a :: a in ands ==> eval(a, vs)
         case Or(ors) => !(forall o :: o in ors ==> !eval(o, vs))
         case Implies(a,b) => !eval(a, vs) || eval(b, vs)
-        case Equivalent(a,b) => eval(a, vs) == eval(b,vs)
+        case Equivalent(a,b) => (eval(a, vs) && eval(b,vs)) || (!eval(a, vs) && !eval(b, vs))
     }
 }
 
+function method invert(e: Expression) : (out: Expression)
+    requires valid(e)
+    ensures valid(out)
+{
+    Not(e)
+}
 
-// function equal(a: Expression, b: Expression, vals: map<Variable,) : bool
-// {
-
-// }
+function method and(es: set<Expression>) : (out: Expression)
+    requires |es| >= 1
+    requires forall e :: e in es ==> valid(e)
+    ensures valid(out)
+{
+    And(es)
+}
 
 method simplify(e: Expression, vs: map<Variable,bool>) returns (out: Expression)
+    requires valid(e)
     requires vs.Keys >= vars(e)
-    // ensures match out {
-    //     case Implies(_,_) => false 
-    //     case Equivalent(_,_) => false 
-    //     case e => true
-    // }
+    decreases e
+    ensures match out {
+        case Implies(_,_) => false 
+        case Equivalent(_,_) => false
+        case Not(ee) =>
+            match ee {
+                case Or(_) => false
+                case _ => true
+            }
+        case e => true
+    }
+    ensures valid(out)
     ensures vars(e) >= vars(out)
     ensures eval(e, vs) == eval(out, vs)
 {
     match e {
-        // case Implies(a,b) => {
-        //     out := Or({a, Not(b)});
-        // }
-        // case Equivalent(a,b) => out := Or({And({a,b}),And({Not(a),Not(b)})});
-        // case Not(n) => {
-        //     out := match n {
-        //         case Or(ors) => And(set o | o in ors :: Not(o))
-        //         case _ => e
-        //     };
-        // }
+        case Implies(a,b) => {
+            out := Or({Not(a), b});
+        }
+        case Equivalent(a,b) => {
+            var both_true := And({a,b});
+            assert eval(both_true, vs) == (eval(a, vs) && eval(b, vs));
+            var both_false := And({Not(a),Not(b)});
+            assert valid(both_false);
+            assert vars(both_false) <= vars(e);
+            assert eval(both_false, vs) == (!eval(a, vs) && !eval(b, vs));
+            out := Or({both_true, both_false});
+            assert valid(out);
+            assert vars(out) <= vars(e);
+            assert eval(e, vs) == eval(out, vs);
+        }
+        case Not(n) => {
+            out := match n {
+                case Or(ors) =>
+                    assert forall i :: i in ors ==> valid(i);
+                    var negs := map o | o in ors :: invert(o);
+                    assert forall i :: i in ors ==> i in negs;
+                    assert |negs| >= 1;
+                    assert forall i :: i in negs.Values ==> valid(i);
+                    and(negs.Values)
+                case _ => e
+            };
+        }
         case e => out := e;
     }
 }
