@@ -1,3 +1,5 @@
+include "util.dfy"
+
 //Provably correct SAT solver
 newtype Variable = int
 
@@ -10,95 +12,67 @@ datatype Expression =
     Implies(Expression, Expression) | 
     Equivalent(Expression, Expression)
 
-predicate valid(e: Expression) 
+function children(e: Expression) : (cs: set<Expression>)
     decreases e
 {
     match e {
-        case Constant(b) => true
-        case Var(v) => true
-        case Not(e) => valid(e)
-        case And(ands) => |ands| >= 1 && forall a :: a in ands ==> valid(a)
-        case Or(ors) => |ors| >= 1 && forall o :: o in ors ==> valid(o)
-        case Implies(a,b) => valid(a) && valid(b)
-        case Equivalent(a,b) => valid(a) && valid(b)
+        case Constant(b) => {}
+        case Var(v) => {}
+        case Not(e) => {e}
+        case And(ands) => ands
+        case Or(ors) => ors
+        case Implies(a,b) => {a, b}
+        case Equivalent(a,b) => {a, b}
     }
 }
 
-function flatten<T>(nested: set<set<T>>) : set<T>
-{
-    set x, y | y in nested && x in y :: x
-}
-
-function pick(s: set<int>): (x: int)
-  requires s != {}
-  ensures |s| == 1 ==> {x} == s
-{
-    var x :| x in s; 
-    assert x in s;
-    if |s| == 1 then 
-        var remainder := s - {x};
-        assert |remainder| == 0;
-        assert remainder == {};
-        assert remainder + {x} == s;
-        assert {x} == s;
-        x
-    else
-        x
-}
-
-function max(s: set<int>) : (m: int)
-    requires |s| >= 1
-    decreases s
-    ensures m in s
-    ensures forall i :: i in s ==> m >= i
-{
-    var x := pick(s);
-    if |s| == 1 then
-        assert forall i :: i in s ==> x >= i;
-        x
-    else 
-        var remainder := s - {x};
-        var y:int := max(remainder);
-        if (x >= y) then 
-            assert forall i :: i in remainder ==> y >= i;
-            assert forall i :: i in remainder ==> x >= i;
-            assert s == {x} + remainder;
-            assert forall i :: i in s ==> x >= i;
-            x
-        else 
-            assert forall i :: i in s ==> y >= i;
-            y
-}
-
-lemma notempty<K,V>(s: set<K>, m: map<K,V>)
-    requires s == m.Keys
-    ensures |s| == |m|
-    ensures |s| >= 1 ==> |m| >= 1
-{}
-
-function height(e: Expression) : int
-    requires valid(e)
+function height(e: Expression) : (h: int)
     decreases e
+    ensures h >= 0
+    ensures forall i :: i in children(e) ==> h > height(i)
 {       
     match e {
-        case Constant(b) => 1
-        case Var(v) => 1
+        case Constant(b) => 0
+        case Var(v) => 0
         case Not(e) => height(e) + 1
-        case And(ands) => 
-            var heights := map a | a in ands :: height(a);
-            notempty(ands, heights);
-            max(heights.Values)
-        case Or(ors) => 
-            var heights := map o | o in ors :: height(o);
-            notempty(ors, heights);
-            max(heights.Values)
-        case Implies(a,b) => max({height(a), height(b)})
-        case Equivalent(a,b) => max({height(a), height(b)})
+        case And(s) =>
+            if |s| == 0 then
+                0
+            else
+                assert s == children(e);
+                var heights_set := set i | i in s :: height(i);
+                var heights_map := map i | i in s :: height(i);
+                assert forall i :: i in s ==> height(i) in heights_set;
+                assert forall i :: i in s ==> i in heights_map.Keys;
+                assert forall i :: i in s ==> height(i) in heights_map.Values;
+                assert heights_set == heights_map.Values;
+                notempty(s, heights_map);
+                var max_child := max(heights_set);
+                var h := max_child + 1;
+                assert forall i :: i in children(e) ==> h > height(i);
+                h
+        case Or(s) => 
+            if |s| == 0 then
+                0
+            else
+                assert s == children(e);
+                var heights_set := set i | i in s :: height(i);
+                var heights_map := map i | i in s :: height(i);
+                assert forall i :: i in s ==> height(i) in heights_set;
+                assert forall i :: i in s ==> i in heights_map.Keys;
+                assert forall i :: i in s ==> height(i) in heights_map.Values;
+                assert heights_set == heights_map.Values;
+                notempty(s, heights_map);
+                var max_child := max(heights_set);
+                var h := max_child + 1;
+                assert forall i :: i in children(e) ==> h > height(i);
+                h
+        case Implies(a,b) => max({height(a), height(b)}) + 1
+        case Equivalent(a,b) => max({height(a), height(b)}) + 1
     }
 }
 
 function vars(e: Expression) : set<Variable>
-    requires valid(e)
     decreases e, height(e)
 {
     match e {
@@ -113,7 +87,6 @@ function vars(e: Expression) : set<Variable>
 }
 
 function eval(e: Expression, vs: map<Variable,bool>) : bool
-    requires valid(e)
     requires vs.Keys >= vars(e)
     decreases e
 {
@@ -128,23 +101,23 @@ function eval(e: Expression, vs: map<Variable,bool>) : bool
     }
 }
 
-function method invert(e: Expression) : (out: Expression)
-    requires valid(e)
-    ensures valid(out)
+lemma demorgan(s: set<Expression>, vs: map<Variable,bool>)
+    requires forall i :: i in s ==> vs.Keys >= vars(i)
+    ensures eval(Not(Or(s)), vs) == eval(And(set i | i in s :: Not(i)), vs)
 {
-    Not(e)
-}
-
-function method and(es: set<Expression>) : (out: Expression)
-    requires |es| >= 1
-    requires forall e :: e in es ==> valid(e)
-    ensures valid(out)
-{
-    And(es)
+    var x := eval(Not(Or(s)), vs);
+    var or := Or(s);
+    assert eval(or, vs) == (!forall i :: i in s ==> !eval(i, vs));
+    assert x == !(!forall i :: i in s ==> !eval(i, vs));
+    
+    var y := eval(And(set i | i in s :: Not(i)), vs);
+    var nots := set i | i in s :: Not(i);
+    assert y == eval(And(nots), vs);
+    assert eval(And(nots), vs) == (forall i :: i in nots ==> eval(i, vs));
+    assert !(!forall i :: i in s ==> !eval(i, vs)) == (forall i :: i in s ==> eval(Not(i), vs));
 }
 
 method simplify(e: Expression, vs: map<Variable,bool>) returns (out: Expression)
-    requires valid(e)
     requires vs.Keys >= vars(e)
     decreases e
     ensures match out {
@@ -157,7 +130,6 @@ method simplify(e: Expression, vs: map<Variable,bool>) returns (out: Expression)
             }
         case e => true
     }
-    ensures valid(out)
     ensures vars(e) >= vars(out)
     ensures eval(e, vs) == eval(out, vs)
 {
@@ -169,25 +141,20 @@ method simplify(e: Expression, vs: map<Variable,bool>) returns (out: Expression)
             var both_true := And({a,b});
             assert eval(both_true, vs) == (eval(a, vs) && eval(b, vs));
             var both_false := And({Not(a),Not(b)});
-            assert valid(both_false);
             assert vars(both_false) <= vars(e);
             assert eval(both_false, vs) == (!eval(a, vs) && !eval(b, vs));
             out := Or({both_true, both_false});
-            assert valid(out);
             assert vars(out) <= vars(e);
             assert eval(e, vs) == eval(out, vs);
         }
         case Not(n) => {
             out := match n {
-                case Or(ors) =>
-                    assert forall i :: i in ors ==> valid(i);
-                    var negs := map o | o in ors :: invert(o);
-                    assert forall i :: i in ors ==> i in negs;
-                    assert |negs| >= 1;
-                    assert forall i :: i in negs.Values ==> valid(i);
-                    and(negs.Values)
+                case Or(s) =>
+                    demorgan(s, vs);
+                    And(set i | i in s :: Not(i))
                 case _ => e
             };
+            assert eval(e, vs) == eval(out, vs);
         }
         case e => out := e;
     }
