@@ -14,6 +14,7 @@ datatype Expression =
 
 function children(e: Expression) : (cs: set<Expression>)
     decreases e
+    ensures e !in cs
 {
     match e {
         case Constant(b) => {}
@@ -28,13 +29,16 @@ function children(e: Expression) : (cs: set<Expression>)
 
 function descendents(e: Expression) : (d: set<Expression>)
     decreases e
+    ensures e !in d
+    ensures children(e) <= d
+    ensures forall i :: i in d ==> height(e) > height(i)
 {
     match e {
         case Constant(b) => {}
         case Var(v) => {}
-        case Not(e) => {e} + descendents(e)
-        case And(s) => s + flatten(set i | i in s :: descendents(s))
-        case Or(s) => s + flatten(set i | i in s :: descendents(s))
+        case Not(x) => {x} + descendents(x)
+        case And(s) => s + flatten(set i | i in s :: descendents(i))
+        case Or(s) => s + flatten(set i | i in s :: descendents(i))
         case Implies(a,b) => {a, b} + descendents(a) + descendents(b)
         case Equivalent(a,b) => {a, b} + descendents(a) + descendents(b)
     }
@@ -174,19 +178,20 @@ method simplify_one(e: Expression, vs: map<Variable,bool>) returns (out: Express
     }
 }
 
-method simplify_recurse(e: Expression, vs: map<Variable,bool>) returns (out: Expression)
-    requires vs.Keys >= vars(e)
-    decreases e
-    ensures match out {
-        case Implies(_,_) => false 
-        case Equivalent(_,_) => false
-        case Not(ee) =>
-            match ee {
-                case Or(_) => false
-                case _ => true
-            }
-        case e => true
-    }
-    ensures vars(e) >= vars(out)
-    ensures eval(e, vs) == eval(out, vs)
-{
+// method simplify_recurse(e: Expression, vs: map<Variable,bool>) returns (out: Expression)
+//     requires vs.Keys >= vars(e)
+//     decreases e
+//     ensures forall i :: i in {e} + descendents(e) ==> match i {
+//         case Implies(_,_) => false 
+//         case Equivalent(_,_) => false
+//         case Not(ee) =>
+//             match ee {
+//                 case Or(_) => false
+//                 case _ => true
+//             }
+//         case e => true
+//     }
+//     ensures vars(e) >= vars(out)
+//     ensures eval(e, vs) == eval(out, vs)
+// {
+// }
