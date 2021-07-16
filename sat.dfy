@@ -26,6 +26,20 @@ function children(e: Expression) : (cs: set<Expression>)
     }
 }
 
+function descendents(e: Expression) : (d: set<Expression>)
+    decreases e
+{
+    match e {
+        case Constant(b) => {}
+        case Var(v) => {}
+        case Not(e) => {e} + descendents(e)
+        case And(s) => s + flatten(set i | i in s :: descendents(s))
+        case Or(s) => s + flatten(set i | i in s :: descendents(s))
+        case Implies(a,b) => {a, b} + descendents(a) + descendents(b)
+        case Equivalent(a,b) => {a, b} + descendents(a) + descendents(b)
+    }
+}
+
 function height(e: Expression) : (h: int)
     decreases e
     ensures h >= 0
@@ -117,7 +131,7 @@ lemma demorgan(s: set<Expression>, vs: map<Variable,bool>)
     assert !(!forall i :: i in s ==> !eval(i, vs)) == (forall i :: i in s ==> eval(Not(i), vs));
 }
 
-method simplify(e: Expression, vs: map<Variable,bool>) returns (out: Expression)
+method simplify_one(e: Expression, vs: map<Variable,bool>) returns (out: Expression)
     requires vs.Keys >= vars(e)
     decreases e
     ensures match out {
@@ -159,3 +173,20 @@ method simplify(e: Expression, vs: map<Variable,bool>) returns (out: Expression)
         case e => out := e;
     }
 }
+
+method simplify_recurse(e: Expression, vs: map<Variable,bool>) returns (out: Expression)
+    requires vs.Keys >= vars(e)
+    decreases e
+    ensures match out {
+        case Implies(_,_) => false 
+        case Equivalent(_,_) => false
+        case Not(ee) =>
+            match ee {
+                case Or(_) => false
+                case _ => true
+            }
+        case e => true
+    }
+    ensures vars(e) >= vars(out)
+    ensures eval(e, vs) == eval(out, vs)
+{
