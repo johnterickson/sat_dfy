@@ -135,7 +135,15 @@ lemma demorgan(s: set<Expression>, vs: map<Variable,bool>)
     assert !(!forall i :: i in s ==> !eval(i, vs)) == (forall i :: i in s ==> eval(Not(i), vs));
 }
 
-method simplify_one(e: Expression, vs: map<Variable,bool>) returns (out: Expression)
+lemma descendents_vars(e: Expression, vs: map<Variable,bool>)
+    requires vs.Keys >= vars(e)
+    ensures forall i :: i in descendents(e) ==> vars(e) >= vars(i)
+    ensures forall i :: i in descendents(e) ==> vs.Keys >= vars(i)
+{
+
+}
+
+function method simplify_one(e: Expression, vs: map<Variable,bool>) : (out: Expression)
     requires vs.Keys >= vars(e)
     decreases e
     ensures match out {
@@ -152,46 +160,147 @@ method simplify_one(e: Expression, vs: map<Variable,bool>) returns (out: Express
     ensures eval(e, vs) == eval(out, vs)
 {
     match e {
-        case Implies(a,b) => {
-            out := Or({Not(a), b});
-        }
-        case Equivalent(a,b) => {
+        case Implies(a,b) => Or({Not(a), b})
+        case Equivalent(a,b) => 
             var both_true := And({a,b});
             assert eval(both_true, vs) == (eval(a, vs) && eval(b, vs));
             var both_false := And({Not(a),Not(b)});
             assert vars(both_false) <= vars(e);
             assert eval(both_false, vs) == (!eval(a, vs) && !eval(b, vs));
-            out := Or({both_true, both_false});
+            var out := Or({both_true, both_false});
             assert vars(out) <= vars(e);
             assert eval(e, vs) == eval(out, vs);
-        }
-        case Not(n) => {
-            out := match n {
+            out
+        case Not(n) =>
+            var out := match n {
                 case Or(s) =>
+                    descendents_vars(e, vs);
                     demorgan(s, vs);
                     And(set i | i in s :: Not(i))
                 case _ => e
             };
             assert eval(e, vs) == eval(out, vs);
-        }
-        case e => out := e;
+            out
+        case e => e
     }
 }
 
-// method simplify_recurse(e: Expression, vs: map<Variable,bool>) returns (out: Expression)
-//     requires vs.Keys >= vars(e)
-//     decreases e
-//     ensures forall i :: i in {e} + descendents(e) ==> match i {
-//         case Implies(_,_) => false 
-//         case Equivalent(_,_) => false
-//         case Not(ee) =>
-//             match ee {
-//                 case Or(_) => false
-//                 case _ => true
-//             }
-//         case e => true
-//     }
-//     ensures vars(e) >= vars(out)
-//     ensures eval(e, vs) == eval(out, vs)
-// {
-// }
+function method simplify_implies(e: Expression, vs: map<Variable,bool>) : (out: Expression)
+    requires vs.Keys >= vars(e)
+    decreases e
+    // ensures forall i :: i in {out} + descendents(out) ==> match i {
+    //     case Implies(_,_) => false 
+    //     case e => true
+    // }
+    ensures vars(e) >= vars(out)
+    ensures eval(e, vs) == eval(out, vs)
+{
+    descendents_vars(e, vs);
+    var out := match e {
+        case Constant(b) => e
+        case Var(v) => e
+        case Not(x) => Not(simplify_implies(x, vs))
+        case And(s) => And(set i | i in s :: simplify_implies(i, vs))
+        case Or(s) => Or(set i | i in s :: simplify_implies(i, vs))
+        case Implies(a,b) => Or({Not(simplify_implies(a, vs)), simplify_implies(b, vs)})
+        case Equivalent(a,b) => Equivalent(simplify_implies(a, vs), simplify_implies(b, vs))
+    };
+    assert match out {
+        case Implies(_,_) => false 
+        case e => true
+    };
+    assert forall i :: i in children(out) ==> match i {
+        case Implies(_,_) => false 
+        case e => true
+    };
+
+    // assert forall i :: i in descendents(out) ==> match i {
+    //     case Implies(_,_) => false 
+    //     case e => true
+    // };
+
+    out
+}
+
+/*
+function method simplify_recurse(e: Expression, vs: map<Variable,bool>) : (out: Expression)
+    requires vs.Keys >= vars(e)
+    decreases e
+    ensures forall i :: i in {out} + children(out) ==> match i {
+        case Implies(_,_) => false 
+        case Equivalent(_,_) => false
+        case Not(ee) =>
+            match ee {
+                case Or(_) => false
+                case _ => true
+            }
+        case e => true
+    }
+    ensures vars(e) >= vars(out)
+    ensures eval(e, vs) == eval(out, vs)
+{
+    descendents_vars(e, vs);
+    var out := match e {
+        case Constant(b) => e
+        case Var(v) => e
+        case Not(x) => Not(simplify_recurse(x, vs))
+        case And(s) => And(set i | i in s :: simplify_recurse(i, vs))
+        case Or(s) => Or(set i | i in s :: simplify_recurse(i, vs))
+        case Implies(a,b) => Implies(simplify_recurse(a, vs), simplify_recurse(b, vs))
+        case Equivalent(a,b) => Equivalent(simplify_recurse(a, vs), simplify_recurse(b, vs))
+    };
+
+    assert forall i :: i in children(out) ==> match i {
+        case Implies(_,_) => false 
+        case Equivalent(_,_) => false
+        case Not(ee) =>
+            match ee {
+                case Or(_) => false
+                case _ => true
+            }
+        case e => true
+    };
+
+    assert vars(e) >= vars(out);
+    assert eval(e, vs) == eval(out, vs);
+    var out := simplify_one(out, vs);
+
+    assert match out {
+        case Implies(_,_) => false 
+        case Equivalent(_,_) => false
+        case Not(ee) =>
+            match ee {
+                case Or(_) => false
+                case _ => true
+            }
+        case e => true
+    };
+
+    var out := match out {
+        case Constant(b) => out
+        case Var(v) => out
+        case Not(x) => Not(simplify_recurse(x, vs))
+        case And(s) => And(set i | i in s :: simplify_recurse(i, vs))
+        case Or(s) => Or(set i | i in s :: simplify_recurse(i, vs))
+        case Implies(a,b) =>
+            assert false;
+            out
+        case Equivalent(a,b) => 
+            assert false;
+            out
+    };
+
+    assert forall i :: i in children(out) ==> match i {
+        case Implies(_,_) => false 
+        case Equivalent(_,_) => false
+        case Not(ee) =>
+            match ee {
+                case Or(_) => false
+                case _ => true
+            }
+        case e => true
+    };
+
+    out
+}
+*/
