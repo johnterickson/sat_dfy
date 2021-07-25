@@ -325,7 +325,7 @@ predicate no_equivalent(e: Expression) {
 
 function method simplify_equivalent(e: Expression, vs: map<Variable,bool>) : (out: Expression)
     requires vs.Keys >= vars(e)
-    ensures no_implies(e)
+    requires no_implies(e)
     decreases e
     ensures no_equivalent(out)
     ensures vars(e) >= vars(out)
@@ -365,6 +365,88 @@ function method simplify_equivalent(e: Expression, vs: map<Variable,bool>) : (ou
             var out := Or(And({a,b}),And({Not(a),Not(b)}));
             assert no_implies(out);
             out
+    };
+
+    out
+}
+
+predicate no_not_expressions(e: Expression) {
+    forall i :: i in {e} + descendents(e) ==> match i {
+        case Not(n) => match n {
+            case Var(_) => true
+            _ => false
+        }
+        case e => true
+    }
+}
+
+function method simplify_not_expressions(e: Expression, vs: map<Variable,bool>) : (out: Expression)
+    requires vs.Keys >= vars(e)
+    requires no_implies(e)
+    requires no_equivalent(out)
+    decreases e
+    ensures no_not_expressions(out)
+    ensures vars(e) >= vars(out)
+    ensures eval(e, vs) == eval(out, vs)
+{
+    descendents_vars(e, vs);
+    var out := match e {
+        case Constant(b) =>
+            assert no_not_expressions(e);
+            e
+        case Var(v) =>
+            assert no_not_expressions(e);
+            e
+        case Not(x) => 
+            var xx := match x {
+                case Constant(b) =>
+                    Constant(!b)
+                case Var(v) =>
+                    Not(x)
+                case Not(xx) =>
+                    var xxx := simplify_not_expressions(xx, vs);
+                    xxx
+                case And(s) =>
+                    var ss := set i | i in s :: simplify_not_expressions(i, vs);
+                    assert forall i :: i in ss ==> no_not_expressions(i);
+                    descendents_vars(e, vs);
+                    demorgan2(ss, vs);
+                    var xx := Or(set i | i in ss :: Not(i));
+                    assert no_not_expressions(xx);
+                    xx
+                case Or(s) =>
+                    var ss := set i | i in s :: simplify_not_expressions(i, vs);
+                    assert forall i :: i in ss ==> no_not_expressions(i);
+                    descendents_vars(e, vs);
+                    demorgan1(ss, vs);
+                    var xx := And(set i | i in ss :: Not(i));
+                    assert no_not_expressions(xx);
+                    xx
+                case Implies(a,b) => 
+                    assert false;
+                    a
+                case Equivalent(a,b) => 
+                    assert false;
+                    a
+            };
+            assert no_not_expressions(xx);
+            xx
+        case And(s) => 
+            var ss := set i | i in s :: simplify_not_expressions(i, vs);
+            assert forall i :: i in ss ==> no_not_expressions(i);
+            assert no_not_expressions(And(ss));
+            And(ss)
+        case Or(s) =>
+            var ss := set i | i in s :: simplify_not_expressions(i, vs);
+            assert forall i :: i in ss ==> no_not_expressions(i);
+            assert no_not_expressions(Or(ss));
+            Or(ss)
+        case Implies(a,b) => 
+            assert false;
+            a
+        case Equivalent(a,b) => 
+            assert false;
+            a
     };
 
     out
