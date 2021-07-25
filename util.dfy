@@ -1,4 +1,13 @@
-function flatten<T>(nested: set<set<T>>) : set<T>
+function flatten<T(!new)>(nested: set<set<T>>) : (f: set<T>)
+    ensures forall i :: i in nested ==> 
+    (
+        (i <= f) &&
+        (forall j :: j in i ==> j in f)
+    )
+    ensures forall i :: i !in f ==>
+    (
+        forall j :: j in nested ==> i !in j
+    )
 {
     set x, y | y in nested && x in y :: x
 }
