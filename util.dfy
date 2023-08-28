@@ -1,12 +1,21 @@
 function flatten<T(!new)>(nested: set<set<T>>) : (f: set<T>)
-    ensures forall i :: i in nested ==> 
+    ensures forall n :: n in nested ==> 
     (
-        (i <= f) &&
-        (forall j :: j in i ==> j in f)
+        (n <= f) &&
+        (forall i :: i in n ==> i in f)
     )
     ensures forall i :: i !in f ==>
     (
         forall j :: j in nested ==> i !in j
+    )
+    ensures forall i :: i in f ==>
+    (
+        exists j :: j in nested && i in j
+    )
+    ensures forall i :: true ==> (
+        i in f
+            <==>
+        exists n :: n in nested && i in n
     )
 {
     set x, y | y in nested && x in y :: x
@@ -66,14 +75,24 @@ lemma notempty<K,V>(s: set<K>, m: map<K,V>)
     ensures |s| >= 1 ==> |m| >= 1
 {}
 
-function map_set<A(!new),B>(x: set<A>, f: (A) -> B) :  (y: set<B>)
-    ensures |x| >= 1 ==> |y| >= 1
-    ensures y == (set i | i in x :: f(i))
-    ensures forall i :: i in x ==> f(i) in y
+function map_not_empty<A,B>(xs: set<A>, m: map<A,B>):  (ys: set<B>)
+    requires xs == m.Keys
+    ensures ys == m.Values
+    ensures |xs| >= 1 ==> |ys| >= 1
+    ensures forall x :: x in xs ==> m[x] in ys
 {
-    var y := set i | i in x :: f(i);
-    ghost var ys_map := map i | i in x :: f(i);
-    assert x == ys_map.Keys;
-    assert y == ys_map.Values;
-    y
+    m.Values
+}
+
+function map_set<A(!new),B>(xs: set<A>, f: (A) -> B) :  (ys: set<B>)
+    requires forall x {:trigger f.requires(x)}{:trigger x in xs} :: x in xs ==> f.requires(x)
+    ensures |xs| >= 1 ==> |ys| >= 1
+    ensures ys == (set i | i in xs :: f(i))
+    ensures forall i :: i in xs ==> f(i) in ys
+{
+    var ys := set i | i in xs :: f(i);
+    ghost var ys_map := map i | i in xs :: f(i);
+    assert xs == ys_map.Keys;
+    assert ys == ys_map.Values;
+    ys
 }
