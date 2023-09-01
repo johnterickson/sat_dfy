@@ -5,40 +5,58 @@ include "util.dfy"
 newtype Variable = int
 
 
-lemma demorgan1(s: set<Expression>, vs: map<Variable,bool>)
+lemma demorgan1(s: set<Expression>)
     requires |s| >= 1
     requires forall i :: i in s ==> i.Valid()
-    requires forall i :: i in s ==> vs.Keys >= i.all_vars()
     ensures 
-        Not(Or(s)).eval(vs) == 
-        And(map_not_empty(s, map i | i in s :: Not(i))).eval(vs)
+        Not(Or(s)).equivalent(And(map_not_empty(s, map i | i in s :: Not(i))))
 {
-    var x := Not(Or(s)).eval(vs);
+    ghost var vs: map<Variable, bool> :| true;
+
     var or := Or(s);
+    var lhs := Not(Or(s));
+    var l := lhs.eval(vs);
     assert or.eval(vs) == (!forall i :: i in s ==> !i.eval(vs));
-    assert x == !(!forall i :: i in s ==> !i.eval(vs));
+    assert lhs.eval(vs) == !(!forall i :: i in s ==> !i.eval(vs));
+    assert l == !(!forall i :: i in s ==> !i.eval(vs));
 
     var nots := map_not_empty(s, map i | i in s :: Not(i));
-    var y := And(nots).eval(vs);
-    assert And(nots).eval(vs) == (forall i :: i in nots ==> i.eval(vs));
+    var rhs := And(nots);
+    var r := rhs.eval(vs);
+    assert r == (forall i :: i in nots ==> i.eval(vs));
     assert !(!forall i :: i in s ==> !i.eval(vs)) == (forall i :: i in s ==> Not(i).eval(vs));
+
+    assert l == r;
+    assert lhs.eval(vs) == rhs.eval(vs);
+    assert forall vs : map<Variable, bool> :: true ==>
+            lhs.eval(vs) == rhs.eval(vs);
 }
 
-lemma demorgan2(s: set<Expression>, vs: map<Variable,bool>)
+lemma demorgan2(s: set<Expression>)
     requires |s| >= 1
-    requires forall i :: i in s ==> i.Valid() && vs.Keys >= i.all_vars()
-    ensures Not(And(s)).eval(vs) == Or(map_not_empty(s, map i | i in s :: Not(i))).eval(vs)
+    requires forall i :: i in s ==> i.Valid() 
+    ensures Not(And(s)).equivalent(Or(map_not_empty(s, map i | i in s :: Not(i))))
 {
+    ghost var vs: map<Variable, bool> :| true;
+
     var and := And(s);
-    var x := Not(and).eval(vs);
-    assert and.eval(vs) != x;
     assert and.eval(vs) == forall i :: i in s ==> i.eval(vs);
     assert and.eval(vs) == !(exists i :: i in s && !i.eval(vs));
-    assert x == exists i :: i in s && !i.eval(vs);
+
+    var lhs := Not(and);
+    var l := lhs.eval(vs);
+    assert and.eval(vs) != l;
+    assert l == exists i :: i in s && !i.eval(vs);
 
     var nots := map_not_empty(s, map i | i in s :: Not(i));
-    var y := Or(nots).eval(vs);
+    var rhs := Or(nots);
+    var r := rhs.eval(vs);
     assert Or(nots).eval(vs) == exists n :: n in nots && n.eval(vs);
+
+    assert l == r;
+    assert lhs.eval(vs) == rhs.eval(vs);
+    assert forall vs : map<Variable, bool> :: true ==>
+            lhs.eval(vs) == rhs.eval(vs);
 }
 
 datatype Expression =
@@ -127,7 +145,68 @@ datatype Expression =
         ds
     }
 
+    function OneEquivalent(a: Expression, b: Expression) : (out: Expression)
+        requires a.Valid() && b.Valid()
+        ensures out.OneEnsures()
+        ensures Equivalent(a,b).equivalent(out)
+    {
+        ghost var vs: map<Variable, bool> :| true;
+        var out := OneEquivalentArbitrary(a, b, vs);
+
+        assert forall m: map<Variable, bool> :: true ==> 
+            (
+                ghost var vs: map<Variable, bool> :| vs == m;
+                ghost var out := OneEquivalentArbitrary(a, b, vs);
+                assert Equivalent(a,b).eval(vs) == out.eval(vs);
+                Equivalent(a,b).eval(m) == out.eval(m)
+            );
+
+        out
+    }
+
+    function OneEquivalentArbitrary(a: Expression, b: Expression, ghost vs: map<Variable, bool>) : (out: Expression)
+        requires a.Valid() && b.Valid()
+        ensures out.OneEnsures()
+        ensures Equivalent(a,b).eval(vs) == out.eval(vs)
+    {
+        var eq := Equivalent(a,b);
+
+        var both_true := And({a,b});
+        assert both_true.eval(vs) == (a.eval(vs) && b.eval(vs));
+        var first_false := Not(a);
+        var second_false := Not(b);
+        var both_false := And({first_false, second_false});
+        assert both_false.eval(vs) == (!a.eval(vs) && !b.eval(vs));
+        var out := Or({both_true, both_false});
+
+        assert eq.eval(vs) == out.eval(vs);
+        out
+    }
+
+    ghost function equivalent(other: Expression) : (eq: bool)
+        requires this.Valid()
+        requires other.Valid()
+    {
+        forall vs : map<Variable, bool> :: true ==>
+            this.eval(vs) == other.eval(vs)
+    }
+
     function eval(vs: map<Variable,bool>) : bool
+        requires this.Valid()
+        decreases this
+    {
+        match this {
+            case Constant(b) => b
+            case Var(v) => if v in vs then vs[v] else false
+            case Not(e) => !e.eval(vs)
+            case And(ands) => forall a :: a in ands ==> a.eval(vs)
+            case Or(ors) => !(forall o :: o in ors ==> !o.eval(vs))
+            case Implies(a,b) => !a.eval(vs) || b.eval(vs)
+            case Equivalent(a,b) => (a.eval(vs) && b.eval(vs)) || (!a.eval(vs) && !b.eval(vs))
+        }
+    }
+
+    function full_eval(vs: map<Variable,bool>) : bool
         requires this.Valid()
         requires vs.Keys >= this.all_vars()
         decreases this
@@ -143,12 +222,10 @@ datatype Expression =
         }
     }
 
-    function simplify_one(vs: map<Variable,bool>) : (out: Expression)
-        requires this.Valid()
-        requires vs.Keys >= this.all_vars()
-        decreases this
-        ensures out.Valid()
-        ensures match out {
+    predicate OneEnsures()
+    {
+        this.Valid() &&
+        match this {
             case Implies(_,_) => false
             case Equivalent(_,_) => false
             case Not(ee) =>
@@ -159,42 +236,35 @@ datatype Expression =
                 }
             case e => true
         }
-        ensures this.all_vars() >= out.all_vars()
-        ensures this.eval(vs) == out.eval(vs)
+    }
+
+    function simplify_one() : (out: Expression)
+        requires this.Valid()
+        decreases this
+        ensures out.OneEnsures()
+        ensures this.equivalent(out)
     {
         match this {
             case Implies(a,b) => 
                 var out := Or({Not(a), b});
-                assert out.all_vars() <= this.all_vars();
-                assert this.eval(vs) == out.eval(vs);
+                assert this.equivalent(out);
                 out
             case Equivalent(a,b) =>
-                var both_true := And({a,b});
-                assert both_true.eval(vs) == (a.eval(vs) && b.eval(vs));
-                var first_false := Not(a);
-                var second_false := Not(b);
-                var both_false := And({first_false, second_false});
-                assert both_false.all_vars() <= this.all_vars();
-                assert both_false.eval(vs) == (!a.eval(vs) && !b.eval(vs));
-                var out := Or({both_true, both_false});
-                assert out.all_vars() <= this.all_vars();
-                assert this.eval(vs) == out.eval(vs);
+                var out := OneEquivalent(a,b);
+                assert this.equivalent(out);
                 out
             case Not(n) =>
                 assert n.Valid();
                 var out := match n {
                     case Or(s) =>
-                        // n.exp.descendents_vars(vs);
-                        demorgan1(s, vs);
+                        demorgan1(s);
                         And(map_not_empty(s, map i | i in s :: Not(i)))
                     case And(s) =>
-                        // n.exp.descendents_vars(vs);
-                        demorgan2(s, vs);
+                        demorgan2(s);
                         Or(map_not_empty(s, map i | i in s :: Not(i)))
                     case _ => this
                 };
-                assert this.all_vars() >= out.all_vars();
-                assert this.eval(vs) == out.eval(vs);
+                assert this.equivalent(out);
                 out
             case e => e
         }
@@ -247,6 +317,174 @@ datatype Expression =
                 Equivalent(a, b)
         };
 
+        assert out.Valid();
+        assert out.no_implies();
+        assert all_vars() >= out.all_vars();
+        assert forall vs: map<Variable,bool> :: vs.Keys >= all_vars() ==> 
+            eval(vs) == out.eval(vs);
+
+        out
+    }
+
+    predicate no_equivalent() {
+        match this {
+            case Equivalent(_,_) => false
+            case e => forall c :: c in e.children() ==> c.no_equivalent()
+        }
+    }
+
+    function simplify_equivalent() : (out: Expression)
+        requires Valid()
+        requires no_implies()
+        decreases this
+        ensures out.Valid()
+        ensures out.no_implies()
+        ensures out.no_equivalent()
+        ensures all_vars() >= out.all_vars()
+        ensures forall vs: map<Variable,bool> :: vs.Keys >= all_vars() ==> 
+            eval(vs) == out.eval(vs)
+    {
+        var out := match this {
+            case Constant(b) =>
+                this
+            case Var(v) =>
+                this
+            case Not(x) =>
+                var xx := x.simplify_equivalent();
+                Not(xx)
+            case And(s) =>
+                var ss := map_not_empty(s, map i | i in s :: i.simplify_equivalent());
+                And(ss)
+            case Or(s) =>
+                var ss := map_not_empty(s, map i | i in s :: i.simplify_equivalent());
+                Or(ss)
+            case Implies(a,b) =>
+                assert false;
+                a
+            case Equivalent(a,b) =>
+                var a:= a.simplify_equivalent();
+                assert a.Valid();
+                assert a.no_implies();
+                assert a.no_equivalent();
+                var b := b.simplify_equivalent();
+                assert b.Valid();
+                assert b.no_implies();
+                assert b.no_equivalent();
+                var both_true := And({a,b});
+                assert both_true.Valid();
+                assert both_true.no_implies();
+                assert both_true.no_equivalent();
+                var left_false := Not(a);
+                assert left_false.Valid();
+                assert left_false.no_implies();
+                assert left_false.no_equivalent();
+                var right_false := Not(b);
+                assert right_false.Valid();
+                assert right_false.no_implies();
+                assert right_false.no_equivalent();
+                var both_false := And({left_false, right_false});
+                assert both_false.Valid();
+                assert both_false.no_implies();
+                assert both_false.no_equivalent();
+                var out := Or({both_true, both_false});
+                assert out.Valid();
+                assert out.no_implies();
+                assert out.no_equivalent();
+                assume false;
+                out
+        };
+
+        out
+    }
+
+    predicate no_not() {
+        match this {
+            case Not(_) => false
+            case e => forall c :: c in e.children() ==> c.no_not()
+        }
+    }
+
+    // function simplify_not_expressions() : (out: Expression)
+    //     requires no_implies()
+    //     requires no_equivalent()
+    //     decreases this
+    //     ensures out.no_not()
+    //     ensures this.all_vars() >= out.all_vars()
+    //     ensures forall vs: map<Variable,bool> :: vs.Keys >= all_vars() ==> 
+    //         eval(vs) == out.eval(vs)
+    // {
+    //     var out := match this {
+    //         case Constant(b) =>
+    //             assert this.no_not();
+    //             this
+    //         case Var(v) =>
+    //             assert this.no_not();
+    //             this
+    //         case Not(x) =>
+    //             var xx := match x {
+    //                 case Constant(b) =>
+    //                     Constant(!b)
+    //                 case Var(v) =>
+    //                     Not(x)
+    //                 case Not(xx) =>
+    //                     var xxx := xx.simplify_not_expressions();
+    //                     xxx
+    //                 case And(s) =>
+    //                     var ss := map_not_empty(s, map i | i in s :: i.simplify_not_expressions());
+    //                     assert forall i :: i in ss ==> i.no_not();
+    //                     demorgan2(ss);
+    //                     var xx := Or(set i | i in ss :: Not(i));
+    //                     assert no_not_expressions(xx);
+    //                     xx
+    //                 case Or(s) =>
+    //                     var ss := set i | i in s :: simplify_not_expressions(i, vs);
+    //                     assert forall i :: i in ss ==> no_not_expressions(i);
+    //                     demorgan1(ss, vs);
+    //                     var xx := And(set i | i in ss :: Not(i));
+    //                     assert no_not_expressions(xx);
+    //                     xx
+    //                 case Implies(a,b) =>
+    //                     assert false;
+    //                     a
+    //                 case Equivalent(a,b) =>
+    //                     assert false;
+    //                     a
+    //             };
+    //             assert no_not_expressions(xx);
+    //             xx
+    //         case And(s) =>
+    //             var ss := map_not_empty(s, map i | i in s :: i.simplify_not_expressions());
+    //             assert forall i :: i in ss ==> i.no_not();
+    //             assert And(ss).no_not();
+    //             And(ss)
+    //         case Or(s) =>
+    //         var ss := map_not_empty(s, map i | i in s :: i.simplify_not_expressions());
+    //             assert forall i :: i in ss ==> i.no_not();
+    //             assert Or(ss).no_not();
+    //             Or(ss)
+    //         case Implies(a,b) =>
+    //             assert false;
+    //             a
+    //         case Equivalent(a,b) =>
+    //             assert false;
+    //             a
+    //     };
+
+    //     out
+    // }
+
+    function simplify() : (out: Expression)
+        requires Valid()
+        ensures out.Valid()
+        ensures out.no_implies()
+        ensures out.no_equivalent()
+        ensures all_vars() >= out.all_vars()
+        ensures forall vs: map<Variable,bool> :: vs.Keys >= all_vars() ==> 
+            eval(vs) == out.eval(vs)
+    {
+        var out := this;
+        var out := out.simplify_implies();
+        var out := out.simplify_equivalent();
         out
     }
 }
@@ -254,341 +492,4 @@ datatype Expression =
 
 
 
- 
 
-//     // lemma descendent_vars(e: Expression, vs: set<Variable>)
-//     //     requires e.vars() == vs
-//     //     decreases e.height
-//     //     //ensures forall i :: i in descendents(e) ==> vars(e) >= vars(i)
-//     // {
-//     //     assert forall i :: i in e.exp.children() ==> e.vars() >= i.vars();
-//     //     var cs := e.exp.children();
-//     //     var cds := flatten(set i | i in e.exp.children() :: i.descendents());
-//     //     var ds := e.descendents();
-//     //     //assert cds < ds;
-
-//     //     var cds_vs := set_vars(cds);
-//     //     var ds_vs := set_vars(ds);
-//     // }
-
-//     function descendents() : (d: set<Expression>)
-//         requires this.Valid()
-//         decreases this.exp
-//         ensures this.exp.children() <= d
-//         ensures forall i :: i in d ==> this.height > i.height
-//         ensures forall i :: i in this.exp.children() ==> descendents() < d
-//     {
-//         match exp {
-//             case Constant(b) => {}
-//             case Var(v) => {}
-//             case Not(x) => {x} + x.descendents()
-//             case And(s) => s + flatten(set i | i in s :: i.descendents())
-//             case Or(s) => s + flatten(set i | i in s :: i.descendents())
-//             case Implies(a,b) => {a, b} + a.descendents() + b.descendents()
-//             case Equivalent(a,b) => {a, b} + a.descendents() + b.descendents()
-//         }
-//     }
-
-
-// }
-
-
-
-// // function child_descendents(e: Expression) : (cd_flat: set<Expression>)
-// //     ensures flatten(set i | i in children(e) :: descendents(i)) <= descendents(e)
-// //     ensures cd_flat == flatten(set i | i in children(e) :: descendents(i))
-// // {
-// //     child_descendents_helper(e, descendents(e))
-// // }
-
-// // function child_descendents_helper(e: Expression, d: set<Expression>) : (cd_flat: set<Expression>)
-// //     requires d == descendents(e)
-// //     ensures flatten(set i | i in children(e) :: descendents(i)) <= d
-// //     ensures cd_flat == flatten(set i | i in children(e) :: descendents(i))
-// // {
-// //     assert forall i :: i in children(e) ==> descendents(i) < d;
-// //     assert e !in d;
-
-// //     var cs := children(e);
-// //     assert forall i :: i in cs ==> descendents(i) < d;
-// //     assert cs == children(e);
-// //     var cd_flat := flatten(set i | i in cs :: descendents(i));
-// //     assert cd_flat == flatten(set i | i in children(e) :: descendents(i));
-// //     assert cd_flat + cs == d;
-// //     assert cd_flat <= d;
-// //     cd_flat
-// // }
-
-// // function height(e: Expression) : (h: int)
-// //     decreases e
-// //     ensures h >= 0
-// //     ensures forall i :: i in children(e) ==> h > height(i)
-// // {
-// //     match e {
-// //         case Constant(b) => 0
-// //         case Var(v) => 0
-// //         case Not(e) => height(e) + 1
-// //         case And(s) =>
-// //             if |s| == 0 then
-// //                 0
-// //             else
-// //                 assert s == children(e);
-// //                 var heights_set := set i | i in s :: height(i);
-// //                 var heights_map := map i | i in s :: height(i);
-// //                 assert forall i :: i in s ==> height(i) in heights_set;
-// //                 assert forall i :: i in s ==> i in heights_map.Keys;
-// //                 assert forall i :: i in s ==> height(i) in heights_map.Values;
-// //                 assert heights_set == heights_map.Values;
-// //                 notempty(s, heights_map);
-// //                 var max_child := max(heights_set);
-// //                 var h := max_child + 1;
-// //                 assert forall i :: i in children(e) ==> h > height(i);
-// //                 h
-// //         case Or(s) =>
-// //             if |s| == 0 then
-// //                 0
-// //             else
-// //                 assert s == children(e);
-// //                 var heights_set := set i | i in s :: height(i);
-// //                 var heights_map := map i | i in s :: height(i);
-// //                 assert forall i :: i in s ==> height(i) in heights_set;
-// //                 assert forall i :: i in s ==> i in heights_map.Keys;
-// //                 assert forall i :: i in s ==> height(i) in heights_map.Values;
-// //                 assert heights_set == heights_map.Values;
-// //                 notempty(s, heights_map);
-// //                 var max_child := max(heights_set);
-// //                 var h := max_child + 1;
-// //                 assert forall i :: i in children(e) ==> h > height(i);
-// //                 h
-// //         case Implies(a,b) => max({height(a), height(b)}) + 1
-// //         case Equivalent(a,b) => max({height(a), height(b)}) + 1
-// //     }
-// // }
-
-
-// /*
-// function set_vars(s: set<Expression>) : (vs: set<Variable>)
-//     ensures forall i :: i in s ==> vars(i) <= vs
-//     ensures flatten(set i | i in s :: vars(i)) == vs
-// {
-//     flatten(set i | i in s :: vars(i))
-// }
-
-// lemma bigger_set_bigger_vars(a: set<Expression>, b: set<Expression>, av: set<Variable>, bv: set<Variable>)
-//     requires a <= b
-//     requires set_vars(a) == av && set_vars(b) == bv
-//     ensures av <= bv
-// {
-
-// }
-// /*
-
-
-
-// */
-
-
-
-
-
-// predicate no_implies(e: Expression) {
-//     forall i :: i in {e} + descendents(e) ==> match i {
-//         case Implies(_,_) => false
-//         case e => true
-//     }
-// }
-
-// function method simplify_implies(e: Expression, vs: map<Variable,bool>) : (out: Expression)
-//     requires vs.Keys >= vars(e)
-//     decreases e
-//     ensures no_implies(out)
-//     ensures vars(e) >= vars(out)
-//     ensures eval(e, vs) == eval(out, vs)
-// {
-//     descendents_vars(e, vs);
-//     var out := match e {
-//         case Constant(b) =>
-//             assert no_implies(e);
-//             e
-//         case Var(v) =>
-//             assert no_implies(e);
-//             e
-//         case Not(x) =>
-//             var xx := simplify_implies(x, vs);
-//             assert no_implies(xx);
-//             assert no_implies(Not(xx));
-//             Not(xx)
-//         case And(s) =>
-//             var ss := set i | i in s :: simplify_implies(i, vs);
-//             assert forall i :: i in ss ==> no_implies(i);
-//             assert no_implies(And(ss));
-//             And(ss)
-//         case Or(s) =>
-//             var ss := set i | i in s :: simplify_implies(i, vs);
-//             assert forall i :: i in ss ==> no_implies(i);
-//             assert no_implies(Or(ss));
-//             Or(ss)
-//         case Implies(a,b) =>
-//             var a:= simplify_implies(a, vs);
-//             assert no_implies(a) && no_implies(Not(a));
-//             var b := simplify_implies(b, vs);
-//             assert no_implies(b);
-//             assert no_implies(Or({Not(a), b}));
-//             Or({Not(a), b})
-//         case Equivalent(a,b) =>
-//             var a:= simplify_implies(a, vs);
-//             assert no_implies(a);
-//             var b := simplify_implies(b, vs);
-//             assert no_implies(b);
-//             assert no_implies(Equivalent(a, b));
-//             Equivalent(a, b)
-//     };
-
-//     out
-// }
-
-// predicate no_equivalent(e: Expression) {
-//     forall i :: i in {e} + descendents(e) ==> match i {
-//         case Equivalent(_,_) => false
-//         case e => true
-//     }
-// }
-
-// function method simplify_equivalent(e: Expression, vs: map<Variable,bool>) : (out: Expression)
-//     requires vs.Keys >= vars(e)
-//     requires no_implies(e)
-//     decreases e
-//     ensures no_equivalent(out)
-//     ensures vars(e) >= vars(out)
-//     ensures eval(e, vs) == eval(out, vs)
-// {
-//     descendents_vars(e, vs);
-//     var out := match e {
-//         case Constant(b) =>
-//             assert no_equivalent(e);
-//             e
-//         case Var(v) =>
-//             assert no_equivalent(e);
-//             e
-//         case Not(x) =>
-//             var xx := simplify_equivalent(x, vs);
-//             assert no_equivalent(xx);
-//             assert no_equivalent(Not(xx));
-//             Not(xx)
-//         case And(s) =>
-//             var ss := set i | i in s :: simplify_equivalent(i, vs);
-//             assert forall i :: i in ss ==> no_equivalent(i);
-//             assert no_equivalent(And(ss));
-//             And(ss)
-//         case Or(s) =>
-//             var ss := set i | i in s :: simplify_equivalent(i, vs);
-//             assert forall i :: i in ss ==> no_equivalent(i);
-//             assert no_equivalent(Or(ss));
-//             Or(ss)
-//         case Implies(a,b) =>
-//             assert false;
-//             a
-//         case Equivalent(a,b) =>
-//             var a:= simplify_equivalent(a, vs);
-//             assert no_equivalent(a);
-//             var b := simplify_equivalent(b, vs);
-//             assert no_equivalent(b);
-//             var out := Or(And({a,b}),And({Not(a),Not(b)}));
-//             assert no_implies(out);
-//             out
-//     };
-
-//     out
-// }
-
-// predicate no_not_expressions(e: Expression) {
-//     forall i :: i in {e} + descendents(e) ==> match i {
-//         case Not(n) => match n {
-//             case Var(_) => true
-//             _ => false
-//         }
-//         case e => true
-//     }
-// }
-
-// function method simplify_not_expressions(e: Expression, vs: map<Variable,bool>) : (out: Expression)
-//     requires vs.Keys >= vars(e)
-//     requires no_implies(e)
-//     requires no_equivalent(out)
-//     decreases e
-//     ensures no_not_expressions(out)
-//     ensures vars(e) >= vars(out)
-//     ensures eval(e, vs) == eval(out, vs)
-// {
-//     descendents_vars(e, vs);
-//     var out := match e {
-//         case Constant(b) =>
-//             assert no_not_expressions(e);
-//             e
-//         case Var(v) =>
-//             assert no_not_expressions(e);
-//             e
-//         case Not(x) =>
-//             var xx := match x {
-//                 case Constant(b) =>
-//                     Constant(!b)
-//                 case Var(v) =>
-//                     Not(x)
-//                 case Not(xx) =>
-//                     var xxx := simplify_not_expressions(xx, vs);
-//                     xxx
-//                 case And(s) =>
-//                     var ss := set i | i in s :: simplify_not_expressions(i, vs);
-//                     assert forall i :: i in ss ==> no_not_expressions(i);
-//                     descendents_vars(e, vs);
-//                     demorgan2(ss, vs);
-//                     var xx := Or(set i | i in ss :: Not(i));
-//                     assert no_not_expressions(xx);
-//                     xx
-//                 case Or(s) =>
-//                     var ss := set i | i in s :: simplify_not_expressions(i, vs);
-//                     assert forall i :: i in ss ==> no_not_expressions(i);
-//                     descendents_vars(e, vs);
-//                     demorgan1(ss, vs);
-//                     var xx := And(set i | i in ss :: Not(i));
-//                     assert no_not_expressions(xx);
-//                     xx
-//                 case Implies(a,b) =>
-//                     assert false;
-//                     a
-//                 case Equivalent(a,b) =>
-//                     assert false;
-//                     a
-//             };
-//             assert no_not_expressions(xx);
-//             xx
-//         case And(s) =>
-//             var ss := set i | i in s :: simplify_not_expressions(i, vs);
-//             assert forall i :: i in ss ==> no_not_expressions(i);
-//             assert no_not_expressions(And(ss));
-//             And(ss)
-//         case Or(s) =>
-//             var ss := set i | i in s :: simplify_not_expressions(i, vs);
-//             assert forall i :: i in ss ==> no_not_expressions(i);
-//             assert no_not_expressions(Or(ss));
-//             Or(ss)
-//         case Implies(a,b) =>
-//             assert false;
-//             a
-//         case Equivalent(a,b) =>
-//             assert false;
-//             a
-//     };
-
-//     out
-// }
-
-// function method simplify(e: Expression, vs: map<Variable,bool>) : (out: Expression)
-//     requires vs.Keys >= vars(e)
-//     ensures no_implies(out)
-//     ensures no_equivalent(out)
-// {
-//     var out := simplify_implies(e, vs);
-//     var out := simplify_equivalent(e, vs);
-//     out
-// }
