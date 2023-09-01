@@ -21,6 +21,14 @@ function flatten<T(!new)>(nested: set<set<T>>) : (f: set<T>)
     set x, y | y in nested && x in y :: x
 }
 
+function max(a: int, b: int) : (m: int)
+    ensures m >= a
+    ensures m >= b
+    ensures m == a || m == b
+{
+    if a >= b then a else b
+}
+
 lemma max_exists(s: set<int>)
     requires |s| >= 1
     ensures exists x :: x in s && forall y :: y in s ==> x >= y
@@ -59,15 +67,6 @@ lemma NotEmptySetHasNotEmptyMapping<A,B>(s: set<A>, f: (A) -> B, m: set<B>)
     assert y in m;
 }
 
-function max(s: set<int>) : (m: int)
-    requires |s| >= 1
-    ensures m in s
-    ensures forall i :: i in s ==> m >= i
-{
-    max_exists(s);
-    var x :| x in s && forall y :: y in s ==> x >= y;
-    x
-}
 
 lemma notempty<K,V>(s: set<K>, m: map<K,V>)
     requires s == m.Keys
