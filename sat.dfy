@@ -284,9 +284,7 @@ datatype Expression =
         decreases this
         ensures out.Valid()
         ensures out.no_implies()
-        ensures all_vars() >= out.all_vars()
-        ensures forall vs: map<Variable,bool> :: vs.Keys >= all_vars() ==> 
-            eval(vs) == out.eval(vs)
+        ensures this.equivalent(out)
     {
         var out := match this {
             case Constant(b) =>
