@@ -3,6 +3,12 @@ include "util.dfy"
 // Provably correct SAT solver
 // inspired by https://siddhartha-gadgil.github.io/automating-mathematics/posts/sat-solving/
 newtype Variable = int
+datatype Literal = 
+    True |
+    False |
+    LitVar(Variable, bool)
+type Clause = set<Literal>
+type CNF = set<Clause>
 
 datatype Expression =
     Constant(bool) |
@@ -119,9 +125,100 @@ datatype Expression =
             this.eval(vs) == other.eval(vs)
     }
 
-    function eval(vs: map<Variable,bool>) : bool
+    lemma EquivalentChildrenAndExpressionAbitrary(e: Expression, a2: Expression, b2: Expression, vs: map<Variable,bool>)
+        requires this.Valid() && a2.Valid() && b2.Valid()
+        requires match this {
+            case Or(a,b)  => e == Or(a2,b2) && a.eval(vs) == a2.eval(vs) && b.eval(vs) == b2.eval(vs)
+            case And(a,b) => e == And(a2,b2) && a.eval(vs) == a2.eval(vs) && b.eval(vs) == b2.eval(vs)
+            case _ => true
+        }
+        ensures match this {
+            case Or(a,b)  => this.eval(vs) ==  Or(a2,b2).eval(vs)
+            case And(a,b) => this.eval(vs) == And(a2,b2).eval(vs)
+            case _ => true
+        } 
+    {
+        match this {
+            case And(a,b) =>
+                assert And(a,b).eval(vs) == (a.eval(vs) && b.eval(vs));
+                assert (a.eval(vs) && b.eval(vs)) == (a2.eval(vs) && b2.eval(vs));
+                assert (a2.eval(vs) && b2.eval(vs)) == And(a2,b2).eval(vs);
+            case Or(a,b) =>
+                assert Or(a,b).eval(vs) == (a.eval(vs) || b.eval(vs));
+                assert (a.eval(vs) || b.eval(vs)) == (a2.eval(vs) || b2.eval(vs));
+                assert (a2.eval(vs) || b2.eval(vs)) == Or(a2,b2).eval(vs);
+            case _ => {}
+        }
+    }
+
+    lemma EquivalentChildrenAndExpression(e: Expression, a2: Expression, b2: Expression)
+        requires this.Valid() && a2.Valid() && b2.Valid()
+        requires match this {
+            case Or(a,b)  => e == Or(a2,b2) && a.equivalent(a2) && b.equivalent(b2)
+            case And(a,b) => e == And(a2,b2) && a.equivalent(a2) && b.equivalent(b2)
+            case _ => false
+        }
+        ensures match this {
+            case Or(a,b)  => this.equivalent(Or(a2,b2))
+            case And(a,b) => this.equivalent(And(a2,b2))
+            case _ => false
+        }
+        ensures this.equivalent(e)
+    {
+        assert forall m: map<Variable, bool> {:trigger true} :: true ==> 
+            (
+                ghost var vs: map<Variable, bool> :| vs == m;
+                this.EquivalentChildrenAndExpressionAbitrary(e, a2, b2, vs);
+                match this {
+                    case And(a,b) =>
+                        (a.eval(vs) == a2.eval(vs) && b.eval(vs) == b2.eval(vs)) ==> this.eval(vs) == And(a2,b2).eval(vs)
+                    case Or(a,b) =>
+                        (a.eval(vs) == a2.eval(vs) && b.eval(vs) == b2.eval(vs)) ==> this.eval(vs) == Or(a2,b2).eval(vs)
+                    case _ => true
+                }
+            );    
+    }
+
+
+    function SubstituteChildren(a2: Expression, b2: Expression) : (out: Expression)
+        requires this.Valid()&& a2.Valid() && b2.Valid()
+        requires match this {
+            case Or(a,b) => a.equivalent(a2) && b.equivalent(b2)
+            case And(a,b) => a.equivalent(a2) && b.equivalent(b2)
+            case _ => false
+        }
+        ensures out.Valid()
+        ensures this.equivalent(out)
+        ensures match this {
+            case Or(_,_) => out == Or(a2,b2)
+            case And(_,_) => out == And(a2,b2)
+            case _ => false
+        }
+    {
+        match this {
+            case Or(a,b) => 
+                var out := Or(a2,b2);
+                assert this.equivalent(out) by {
+                    this.EquivalentChildrenAndExpression(Or(a2,b2), a2, b2);
+                }
+                out
+            case And(a,b) =>
+                var out := And(a2,b2);
+                assert this.equivalent(out) by {
+                    this.EquivalentChildrenAndExpression(And(a2,b2), a2, b2);
+                }
+                out
+            case e => assert false; e
+        }
+    }
+
+    function eval(vs: map<Variable,bool>) : (b: bool)
         requires this.Valid()
         decreases this
+        ensures match this {
+            case Or(x,y)=> b == x.eval(vs) || y.eval(vs)
+            case _ => true
+        }
     {
         match this {
             case Constant(b) => b
@@ -329,8 +426,191 @@ datatype Expression =
         }
     }
 
+    lemma DistributeEquivalent(a: Expression, b: Expression, c: Expression, d: Expression)
+        requires a.Valid() && b.Valid() && c.Valid() && d.Valid()
+        requires a == And(c,d)
+        ensures And(Or(a,c), Or(a,d)).Valid()
+        ensures Or(And(c,d),b).equivalent(And(Or(b,c), Or(b,d)))
+    {
+        ghost var vs: map<Variable, bool> :| true;
+        assert Or(a,b).eval(vs) == And(Or(b,c), Or(b,d)).eval(vs);
+    }
 
+    lemma DistributeEquivalent1(a: Expression, b: Expression, bc1: Expression, bc2: Expression)
+        requires a.Valid() && b.Valid() && bc1.Valid() && bc2.Valid()
+        requires b == And(bc1,bc2)
+        ensures Or(a,And(bc1,bc2)).equivalent(And(Or(a,bc1),Or(a,bc2)))
+    {
+        ghost var vs: map<Variable, bool> :| true;
+        assert Or(a,b).eval(vs) == And(Or(a,bc1), Or(a,bc2)).eval(vs);
+    }
 
+    function DistributeEquivalent2Abitrary(vs: map<Variable, bool>, a: Expression, b: Expression, c: Expression, d: Expression, e: Expression, f: Expression) : (out: Expression)
+        requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid() && f.Valid()
+        requires a == And(c,d)
+        requires b == And(e,f)
+        ensures out == And(And(Or(c,e),Or(d,e)),And(Or(c,f),Or(d,f)))
+        ensures Or(a,b).eval(vs) == out.eval(vs)
+    {
+        assert Or(a,b).eval(vs) == Or(a,And(e,f)).eval(vs);
+        DistributeEquivalent1(a, And(e,f), e, f);
+        assert Or(a,b).eval(vs) == And(
+            Or(a,e), 
+            Or(a,f)
+        ).eval(vs);
+
+        assert Or(a,e).eval(vs) == Or(And(c,d),e).eval(vs);
+        DistributeEquivalent1(e, And(c,d), c, d);
+        assert Or(a,e).eval(vs) == And(Or(c,e),Or(d,e)).eval(vs);
+
+        assert Or(a,f).eval(vs) == Or(And(c,d),f).eval(vs);
+        DistributeEquivalent1(f, And(c,d), c, d);
+        assert Or(a,f).eval(vs) == And(Or(c,f),Or(d,f)).eval(vs);
+
+        var out := And(
+            And(Or(c,e),Or(d,e)),
+            And(Or(c,f),Or(d,f))
+        );
+        assert Or(a,b).eval(vs) == out.eval(vs);
+        out
+    }
+
+    lemma DistributeEquivalent2(a: Expression, b: Expression, c: Expression, d: Expression, e: Expression, f: Expression)
+        requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid() && f.Valid()
+        requires a == And(c,d)
+        requires b == And(e,f)
+        ensures Or(a,b).equivalent(And(And(Or(c,e),Or(d,e)),And(Or(c,f),Or(d,f))))
+    {
+        assert forall m: map<Variable, bool> :: true ==> 
+            (
+                ghost var vs: map<Variable, bool> :| vs == m;
+                var out := DistributeEquivalent2Abitrary(vs, a, b, c, d, e, f);
+                assert Or(a,b).eval(vs) == And(And(Or(c,e),Or(d,e)),And(Or(c,f),Or(d,f))).eval(vs);
+                Or(a,b).eval(m) == out.eval(m)
+            );
+    }
+
+    predicate no_or_and()
+    {
+        match this {
+            case Or(a,b) =>
+                match a {
+                    case And(_,_) => false
+                    case _ => true
+                }
+                && 
+                match b {
+                    case And(_,_) => false
+                    case _ => true
+                } 
+            case e => forall c :: c in e.children() ==> c.no_or_and()
+        }
+    }
+
+    function distribute_once() : (out: Expression)
+        requires this.Valid()
+        requires this.no_implies()
+        requires this.no_equivalent()
+        requires this.no_not()
+        requires match this {
+            case Or(a,b) => 
+                match a {
+                    case And(_,_) => true
+                    case _ => false
+                } && match b {
+                    case And(_,_) => false
+                    case _ => true
+                }
+                case _ => false
+        }
+        ensures out.Valid()
+        ensures out.no_implies()
+        ensures out.no_equivalent()
+        ensures out.no_not()
+        ensures this.equivalent(out)
+    {
+        match this {
+            case Or(a,b) =>
+                match (a,b) {
+                    case (a, And(bc1,bc2)) =>
+                        DistributeEquivalent(a,b,bc1,bc2);
+                        And(Or(a,bc1),Or(a,bc2))
+                    case _ => this
+                }
+            case _ => this
+        }
+    }
+
+    function distribute() : (out: Expression)
+        requires this.Valid()
+        requires this.no_implies()
+        requires this.no_equivalent()
+        requires this.no_not()
+        decreases this.height()
+        ensures out.Valid()
+        ensures out.no_implies()
+        ensures out.no_equivalent()
+        ensures out.no_not()
+        ensures out.no_or_and()
+        ensures this.equivalent(out)
+    {
+        match this {              
+            case Constant(_) => this
+            case Var(_, _) => this
+            case And(a, b) => And(a.distribute(), b.distribute())
+            case Or(a,b) =>
+                assert a.Valid() && a.no_implies() && a.no_equivalent() && a.no_not();
+                assert b.Valid() && b.no_implies() && b.no_equivalent() && b.no_not();
+                match (a,b) {
+                    case (And(c,d), And(e,f)) =>
+                        assume false; 
+                        // DistributeEquivalent2(a,b,c,d,e,f);
+                        // var expanded := And(
+                        //     And(Or(c,e),Or(d,e)),
+                        //     And(Or(c,f),Or(d,f)));
+                        // assert {:split_here} this.equivalent(expanded);
+                            
+                        // var c2 := c.distribute();
+                        // var d2 := d.distribute();
+                        // var e2 := e.distribute();
+                        // var f2 := f.distribute();
+                        
+                        // var or1 := Or(c,e).SubstituteChildren(c2,e2);
+                        // var or2 := Or(d,e).SubstituteChildren(d2,e2);
+                        // var and1 := And(Or(c,e),Or(d,e)).SubstituteChildren(or1,or2);
+                        // var or3:= Or(c,f).SubstituteChildren(c2,f2);
+                        // var or4:= Or(d,f).SubstituteChildren(d2,f2);
+                        // var and2 := And(Or(c,f),Or(d,f)).SubstituteChildren(or3,or4);
+                        // var out := expanded.SubstituteChildren(and1, and2);
+                        // assert this.equivalent(out);
+                        this
+                    case (a, And(c,d)) =>
+                        assert {:split_here} true;
+                        DistributeEquivalent(b, a, c, d);
+                        var or1 := Or(a,c).SubstituteChildren(a, c.distribute());
+                        var or1 := or1.distribute();
+                        var or2 := Or(a,d).SubstituteChildren(a, d.distribute());
+                        var or2 := or2.distribute();
+                        var out := And(Or(a,c), Or(a,d)).SubstituteChildren(or1, or2);
+                        assert this.equivalent(out);
+                        assert out.no_or_and();
+                        out
+                    case (And(c,d),b) =>
+                        assert {:split_here} true;
+                        DistributeEquivalent(a, b, c, d);
+                        var or1 := Or(b,c).SubstituteChildren(b, c.distribute());
+                        var or2 := Or(b,d).SubstituteChildren(b, d.distribute());
+                        var out := And(Or(b,c), Or(b,d)).SubstituteChildren(or1, or2);
+                        assert this.equivalent(out);
+                        assert out.no_or_and();
+                        out
+                    case _ => this
+                }
+            case Implies(a,b) => assert false; a
+            case Equivalent(a,b) => assert false; a
+            case Not(x) => assert false; x
+        }
+    }
 
     function simplify() : (out: Expression)
         requires Valid()
@@ -338,14 +618,69 @@ datatype Expression =
         ensures out.no_implies()
         ensures out.no_equivalent()
         ensures out.no_not()
+        ensures out.no_or_and()
         ensures this.equivalent(out)
     {
         var out := this;
         var out := out.remove_implies();
         var out := out.remove_equivalent();
         var out := out.replace_not();
+        var out := out.distribute();
         out
     }
+
+    predicate no_and() {
+        match this {
+            case And(_,_) => false
+            case e => forall c :: c in e.children() ==> c.no_and()
+        }
+    }
+
+    // function make_clause() : (c : Clause)
+    //     requires Valid()
+    //     requires no_implies()
+    //     requires no_equivalent()
+    //     requires no_not()
+    //     requires no_or_and()
+    //     requires no_and()
+    // {
+    //     match this {
+    //         case Constant(b) => { if b then True else False }
+    //         case Var(v, inverted) => { LitVar(v, inverted) }
+    //         case And(a,b) => { assert false; False }
+    //         case Or(a,b) => a.make_clause() + b.make_clause()
+    //         case Not(e) => { assert false; False }
+    //         case Implies(a,b) => { assert false; False }
+    //         case Equivalent(a,b) => { assert false; False }
+    //     }
+    // }
+
+    // function make_cnf() : (cnf : CNF)
+    //     requires Valid()
+    //     requires no_implies()
+    //     requires no_equivalent()
+    //     requires no_not()
+    //     requires no_or_and()
+    // {
+    //     match this {
+    //         case Constant(b) => {{if b then True else False}}
+    //         case Var(v, inverted) => {{LitVar(v, inverted)}}
+    //         case And(a,b) => { a.make_clause() , b.make_clause()}
+    //         case Or(a,b) => { a.make_clause() + b.make_clause()}
+    //         case Not(e) => {{ assert false; False }}
+    //         case Implies(a,b) => {{ assert false; False }}
+    //         case Equivalent(a,b) => {{ assert false; False }}
+    //     }
+    // }
+
+    // function run() : bool
+    //     requires this.Valid()
+    // {
+    //     var simplified := this.simplify();
+    //     var cnf := simplified.make_cnf();
+
+    //     false
+    // }
 }
 
 
