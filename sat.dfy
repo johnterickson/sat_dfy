@@ -215,10 +215,6 @@ datatype Expression =
     function eval(vs: map<Variable,bool>) : (b: bool)
         requires this.Valid()
         decreases this
-        ensures match this {
-            case Or(x,y)=> b == x.eval(vs) || y.eval(vs)
-            case _ => true
-        }
     {
         match this {
             case Constant(b) => b
@@ -426,24 +422,24 @@ datatype Expression =
         }
     }
 
-    lemma DistributeEquivalent(a: Expression, b: Expression, c: Expression, d: Expression)
-        requires a.Valid() && b.Valid() && c.Valid() && d.Valid()
-        requires a == And(c,d)
-        ensures And(Or(a,c), Or(a,d)).Valid()
-        ensures Or(And(c,d),b).equivalent(And(Or(b,c), Or(b,d)))
-    {
-        ghost var vs: map<Variable, bool> :| true;
-        assert Or(a,b).eval(vs) == And(Or(b,c), Or(b,d)).eval(vs);
-    }
+    // lemma DistributeEquivalent(a: Expression, b: Expression, c: Expression, d: Expression)
+    //     requires a.Valid() && b.Valid() && c.Valid() && d.Valid()
+    //     requires a == And(c,d)
+    //     ensures And(Or(a,c), Or(a,d)).Valid()
+    //     ensures Or(And(c,d),b).equivalent(And(Or(b,c), Or(b,d)))
+    // {
+    //     ghost var vs: map<Variable, bool> :| true;
+    //     assert Or(a,b).eval(vs) == And(Or(b,c), Or(b,d)).eval(vs);
+    // }
 
-    lemma DistributeEquivalent1(a: Expression, b: Expression, bc1: Expression, bc2: Expression)
-        requires a.Valid() && b.Valid() && bc1.Valid() && bc2.Valid()
-        requires b == And(bc1,bc2)
-        ensures Or(a,And(bc1,bc2)).equivalent(And(Or(a,bc1),Or(a,bc2)))
-    {
-        ghost var vs: map<Variable, bool> :| true;
-        assert Or(a,b).eval(vs) == And(Or(a,bc1), Or(a,bc2)).eval(vs);
-    }
+    // lemma DistributeEquivalent1(a: Expression, b: Expression, bc1: Expression, bc2: Expression)
+    //     requires a.Valid() && b.Valid() && bc1.Valid() && bc2.Valid()
+    //     requires b == And(bc1,bc2)
+    //     ensures Or(a,And(bc1,bc2)).equivalent(And(Or(a,bc1),Or(a,bc2)))
+    // {
+    //     ghost var vs: map<Variable, bool> :| true;
+    //     assert Or(a,b).eval(vs) == And(Or(a,bc1), Or(a,bc2)).eval(vs);
+    // }
 
     // function DistributeEquivalent2Abitrary(vs: map<Variable, bool>, a: Expression, b: Expression, c: Expression, d: Expression, e: Expression, f: Expression) : (out: Expression)
     //     requires a.Valid() && b.Valid() && c.Valid() && d.Valid() && e.Valid() && f.Valid()
@@ -490,87 +486,64 @@ datatype Expression =
     //         );
     // }
 
-    
-
-    ghost function top_two_or_and_heights() : (h: (int, int))
-        requires this.Valid()
-        ensures this.height() >= h.0 >= h.1 >= 0
-        ensures forall i :: i in this.children() ==> h.0 >= i.top_two_or_and_heights().0
-        ensures forall i :: i in this.children() ==>
-            h.0 > i.top_two_or_and_heights().0 || h.1 >= i.top_two_or_and_heights().1
-    {
-        match this {
-            case Constant(b) => (0,0)
-            case Var(v, _) => (0,0)
-            case Not(e) => 
-                var out := e.top_two_or_and_heights();
-                assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
-                assert forall i :: i in this.children() ==>
-                    out.0 > i.top_two_or_and_heights().0 || out.1 >= i.top_two_or_and_heights().1;
-                out
-            case And(a,b) =>
-                assume false;
-                var out := merge_top_two(a.top_two_or_and_heights(), b.top_two_or_and_heights());
-                assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
-                out
-            case Implies(a,b) =>
-                assume false;
-                var out := merge_top_two(a.top_two_or_and_heights(), b.top_two_or_and_heights());
-                assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
-                out
-            case Equivalent(a,b) =>
-                assume false;
-                var out := merge_top_two(a.top_two_or_and_heights(), b.top_two_or_and_heights());
-                assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
-                out
-            case Or(a,b) =>
-                assume false;
-                match (a,b) {
-                    case (And(_,_),And(_,_)) =>
-                        var out := (this.height(), this.height());
-                        assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
-                        out
-                    case (a , And(_,_)) =>
-                        var out := merge_top_two(
-                            (this.height(), 0),
-                            merge_top_two(a.top_two_or_and_heights(), b.top_two_or_and_heights()));
-                        assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
-                        out
-                    case (And(_,_) , b) =>
-                        var out := merge_top_two(
-                            (this.height(), 0),
-                            merge_top_two(a.top_two_or_and_heights(), b.top_two_or_and_heights()));
-                        assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
-                        out
-                    case (a, b) =>
-                        var out := merge_top_two(a.top_two_or_and_heights(), b.top_two_or_and_heights());
-                        assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
-                        out
-                }
-        }
-    }
-
-    predicate is_or_and()
-    {
-        match this {
-            case Or(a,b) =>
-                match a {
-                    case And(_,_) => true
-                    case _ => false
-                }
-                || 
-                match b {
-                    case And(_,_) => true
-                    case _ => false
-                } 
-            case _ => false
-        }
-    }
-
-    predicate no_or_and()
-    {
-        !this.is_or_and() && forall c :: c in this.children() ==> c.no_or_and()
-    }
+    // ghost function top_two_or_and_heights() : (h: (int, int))
+    //     requires this.Valid()
+    //     ensures this.height() >= h.0 >= h.1 >= 0
+    //     ensures forall i :: i in this.children() ==> h.0 >= i.top_two_or_and_heights().0
+    //     ensures forall i :: i in this.children() ==>
+    //         h.0 > i.top_two_or_and_heights().0 || h.1 >= i.top_two_or_and_heights().1
+    // {
+    //     match this {
+    //         case Constant(b) => (0,0)
+    //         case Var(v, _) => (0,0)
+    //         case Not(e) => 
+    //             assert {:split_here} true;
+    //             var out := e.top_two_or_and_heights();
+    //             assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
+    //             assert forall i :: i in this.children() ==>
+    //                 out.0 > i.top_two_or_and_heights().0 || out.1 >= i.top_two_or_and_heights().1;
+    //             out
+    //         case And(a,b) =>
+    //             assert {:split_here} true;
+    //             var out := merge_top_two(a.top_two_or_and_heights(), b.top_two_or_and_heights());
+    //             assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
+    //             out
+    //         case Implies(a,b) =>
+    //             assert {:split_here} true;
+    //             var out := merge_top_two(a.top_two_or_and_heights(), b.top_two_or_and_heights());
+    //             assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
+    //             out
+    //         case Equivalent(a,b) =>
+    //             assert {:split_here} true;
+    //             var out := merge_top_two(a.top_two_or_and_heights(), b.top_two_or_and_heights());
+    //             assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
+    //             out
+    //         case Or(a,b) =>
+    //             assume false;
+    //             match (a,b) {
+    //                 case (And(_,_),And(_,_)) =>
+    //                     var out := (this.height(), this.height());
+    //                     assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
+    //                     out
+    //                 case (a , And(_,_)) =>
+    //                     var out := merge_top_two(
+    //                         (this.height(), 0),
+    //                         merge_top_two(a.top_two_or_and_heights(), b.top_two_or_and_heights()));
+    //                     assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
+    //                     out
+    //                 case (And(_,_) , b) =>
+    //                     var out := merge_top_two(
+    //                         (this.height(), 0),
+    //                         merge_top_two(a.top_two_or_and_heights(), b.top_two_or_and_heights()));
+    //                     assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
+    //                     out
+    //                 case (a, b) =>
+    //                     var out := merge_top_two(a.top_two_or_and_heights(), b.top_two_or_and_heights());
+    //                     assert forall i :: i in this.children() ==> out.0 >= i.top_two_or_and_heights().0;
+    //                     out
+    //             }
+    //     }
+    // }
 
     // ghost function or_and_heights() : (h: int)
     //     ensures h >= 0
@@ -639,88 +612,88 @@ datatype Expression =
     //     }
     // }
 
-    function distribute() : (out: Expression)
-        requires this.Valid()
-        requires this.no_implies()
-        requires this.no_equivalent()
-        requires this.no_not()
-        decreases this.height(), this.top_two_or_and_heights()
-        ensures out.Valid()
-        ensures out.no_implies()
-        ensures out.no_equivalent()
-        ensures out.no_not()
-        ensures out.no_or_and()
-        ensures this.equivalent(out)
-        ensures out.top_two_or_and_heights() == (0,0)
-    {
-        match this {              
-            case Constant(_) => this
-            case Var(_, _) => this
-            case And(a, b) => 
+    // function distribute() : (out: Expression)
+    //     requires this.Valid()
+    //     requires this.no_implies()
+    //     requires this.no_equivalent()
+    //     requires this.no_not()
+    //     decreases this.height(), this.top_two_or_and_heights()
+    //     ensures out.Valid()
+    //     ensures out.no_implies()
+    //     ensures out.no_equivalent()
+    //     ensures out.no_not()
+    //     ensures out.no_or_and()
+    //     ensures this.equivalent(out)
+    //     ensures out.top_two_or_and_heights() == (0,0)
+    // {
+    //     match this {              
+    //         case Constant(_) => this
+    //         case Var(_, _) => this
+    //         case And(a, b) => 
 
-                And(a.distribute(), b.distribute())
-            case Or(a,b) =>
-                assert a.Valid() && a.no_implies() && a.no_equivalent() && a.no_not();
-                assert b.Valid() && b.no_implies() && b.no_equivalent() && b.no_not();
-                match (a,b) {
-                    case (And(c,d), And(e,f)) =>
-                        assume false; 
-                        // DistributeEquivalent2(a,b,c,d,e,f);
-                        // var expanded := And(
-                        //     And(Or(c,e),Or(d,e)),
-                        //     And(Or(c,f),Or(d,f)));
-                        // assert {:split_here} this.equivalent(expanded);
+    //             And(a.distribute(), b.distribute())
+    //         case Or(a,b) =>
+    //             assert a.Valid() && a.no_implies() && a.no_equivalent() && a.no_not();
+    //             assert b.Valid() && b.no_implies() && b.no_equivalent() && b.no_not();
+    //             match (a,b) {
+    //                 case (And(c,d), And(e,f)) =>
+    //                     assume false; 
+    //                     DistributeEquivalent2(a,b,c,d,e,f);
+    //                     var expanded := And(
+    //                         And(Or(c,e),Or(d,e)),
+    //                         And(Or(c,f),Or(d,f)));
+    //                     assert {:split_here} this.equivalent(expanded);
                             
-                        // var c2 := c.distribute();
-                        // var d2 := d.distribute();
-                        // var e2 := e.distribute();
-                        // var f2 := f.distribute();
+    //                     var c2 := c.distribute();
+    //                     var d2 := d.distribute();
+    //                     var e2 := e.distribute();
+    //                     var f2 := f.distribute();
                         
-                        // var or1 := Or(c,e).SubstituteChildren(c2,e2);
-                        // var or2 := Or(d,e).SubstituteChildren(d2,e2);
-                        // var and1 := And(Or(c,e),Or(d,e)).SubstituteChildren(or1,or2);
-                        // var or3:= Or(c,f).SubstituteChildren(c2,f2);
-                        // var or4:= Or(d,f).SubstituteChildren(d2,f2);
-                        // var and2 := And(Or(c,f),Or(d,f)).SubstituteChildren(or3,or4);
-                        // var out := expanded.SubstituteChildren(and1, and2);
-                        // assert this.equivalent(out);
-                        this
-                    case (a, And(e,f)) =>
-                        assert {:split_here} true;
-                        DistributeEquivalent(b, a, e, f);
-                        var e2 := e.distribute();
-                        assert e2.top_two_or_and_heights() == (0,0);
-                        var or1 := Or(a,e).SubstituteChildren(a, e2);
-                        var or1 := or1.distribute();
+    //                     var or1 := Or(c,e).SubstituteChildren(c2,e2);
+    //                     var or2 := Or(d,e).SubstituteChildren(d2,e2);
+    //                     var and1 := And(Or(c,e),Or(d,e)).SubstituteChildren(or1,or2);
+    //                     var or3:= Or(c,f).SubstituteChildren(c2,f2);
+    //                     var or4:= Or(d,f).SubstituteChildren(d2,f2);
+    //                     var and2 := And(Or(c,f),Or(d,f)).SubstituteChildren(or3,or4);
+    //                     var out := expanded.SubstituteChildren(and1, and2);
+    //                     assert this.equivalent(out);
+    //                     this
+    //                 case (a, And(e,f)) =>
+    //                     assert {:split_here} true;
+    //                     DistributeEquivalent(b, a, e, f);
+    //                     var e2 := e.distribute();
+    //                     assert e2.top_two_or_and_heights() == (0,0);
+    //                     var or1 := Or(a,e).SubstituteChildren(a, e2);
+    //                     var or1 := or1.distribute();
 
-                        assume false; 
+    //                     assume false; 
 
-                        var f2 := f.distribute();
-                        var or2 := Or(a,f).SubstituteChildren(a, f2);
-                        var or2 := or2.distribute(); 
+    //                     var f2 := f.distribute();
+    //                     var or2 := Or(a,f).SubstituteChildren(a, f2);
+    //                     var or2 := or2.distribute(); 
 
-                        var out := And(Or(a,e), Or(a,f)).SubstituteChildren(or1, or2);
-                        // assert out == And(or1, or2);
-                        // assert this.equivalent(out);
-                        // assert out.no_or_and();
-                        out
-                    case (And(c,d),b) =>
-                        assert {:split_here} true;
-                        assume false; 
-                        DistributeEquivalent(a, b, c, d);
-                        var or1 := Or(b,c).SubstituteChildren(b, c.distribute());
-                        var or2 := Or(b,d).SubstituteChildren(b, d.distribute());
-                        var out := And(Or(b,c), Or(b,d)).SubstituteChildren(or1, or2);
-                        assert this.equivalent(out);
-                        assert out.no_or_and();
-                        out
-                    case _ => this
-                }
-            case Implies(a,b) => assert false; a
-            case Equivalent(a,b) => assert false; a
-            case Not(x) => assert false; x
-        }
-    }
+    //                     var out := And(Or(a,e), Or(a,f)).SubstituteChildren(or1, or2);
+    //                     assert out == And(or1, or2);
+    //                     assert this.equivalent(out);
+    //                     assert out.no_or_and();
+    //                     out
+    //                 case (And(c,d),b) =>
+    //                     assert {:split_here} true;
+    //                     assume false; 
+    //                     DistributeEquivalent(a, b, c, d);
+    //                     var or1 := Or(b,c).SubstituteChildren(b, c.distribute());
+    //                     var or2 := Or(b,d).SubstituteChildren(b, d.distribute());
+    //                     var out := And(Or(b,c), Or(b,d)).SubstituteChildren(or1, or2);
+    //                     assert this.equivalent(out);
+    //                     assert out.no_or_and();
+    //                     out
+    //                 case _ => this
+    //             }
+    //         case Implies(a,b) => assert false; a
+    //         case Equivalent(a,b) => assert false; a
+    //         case Not(x) => assert false; x
+    //     }
+    // }
 
     // function simplify() : (out: Expression)
     //     requires Valid()

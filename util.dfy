@@ -221,48 +221,73 @@ lemma SecondHasAtMostOneThatIsBigger(s: seq<int>, m:(int,int))
     assert visited == (set ii {:trigger true} | 0 <= ii < |s|);
 }
 
-function find_seq_top_two(s: seq<int>) : (m:(int,int))
+function find_indices_of_top_two(s: seq<int>) : (i:(int,int))
     requires |s| >= 2
-    ensures 0 <= m.0 < |s|
-    ensures 0 <= m.1 < |s|
-    ensures forall ii :: 0 <= ii < |s| ==> s[m.0] >= s[ii]
-    ensures forall ii :: 0 <= ii < |s| ==> ii == m.0 || s[m.1] >= s[ii]
-    ensures forall ii :: 0 <= ii < |s| && ii != m.0 ==> s[m.1] >= s[ii]
-    ensures |set i | 0 <= i < |s| && s[i] > s[m.1]| <= 1
+    ensures 0 <= i.0 < |s|
+    ensures 0 <= i.1 < |s|
+    ensures i.0 != i.1
+    ensures s[i.0] >= s[i.1]
+    ensures s[i.0] == s[i.1] ==>
+        forall ii :: 0 <= ii < |s| ==> s[i.0] >= s[ii] && s[i.1] >= s[ii]
+    ensures s[i.0] != s[i.1] ==>
+        forall ii :: 0 <= ii < |s| ==> s[i.0] >= s[ii]
+    ensures s[i.0] != s[i.1] ==>
+        forall ii :: 0 <= ii < |s| ==> ii == i.0 || s[i.1] >= s[ii]
 {
-    var m := if |s| == 2 then
-            if s[0] >= s[1] then (0,1) else (1,0)
+    var i := if |s| == 2 then
+        if s[0] >= s[1] then (0,1) else (1,0)
+    else
+        var e := |s|-1;
+        var i := find_indices_of_top_two(s[0..e]);
+        if s[e] > s[i.0] then
+            (e,i.0)
+        else if s[e] > s[i.1] then
+            (i.0,e)
         else
-            var e := |s|-1;
-            var m := find_seq_top_two(s[0..e]);
-            if s[e] > s[m.0] then
-                (e,m.0)
-            else if s[e] > s[m.1] then
-                (m.0,e)
-            else
-                (m.0,m.1);
-    SecondHasAtMostOneThatIsBigger(s, m);
-    m
+            (i.0,i.1);
+    SecondHasAtMostOneThatIsBigger(s, i);
+    i
 }
 
 function merge_top_two(a:(int,int), b:(int,int)) : (m:(int,int))
     requires a.0 >= a.1
     requires b.0 >= b.1
     ensures m.0 >= m.1
-    ensures
-        var s := [a.0, a.1, b.0, b.1];
-        var i := find_seq_top_two(s);
-        m.0 == s[i.0] && m.1 == s[i.1] &&
-        (forall ii :: 0 <= ii < |s| ==> s[i.0] >= s[ii]) &&
-        (forall ii :: 0 <= ii < |s| ==> ii == i.0 || s[i.1] >= s[ii]) &&
-        (forall ii :: 0 <= ii < |s| && ii != i.0 ==> s[i.1] >= s[ii]) &&
-        |set ii | 0 <= ii < |s| && s[ii] > s[i.1]| <= 1
+    ensures m == top_two([a.0, a.1, b.0, b.1])
+    // ensures
+    //     var s := [a.0, a.1, b.0, b.1];
+    //     var i := find_indices_of_top_two(s);
+    //     m.0 == s[i.0] && m.1 == s[i.1] &&
+    //     (forall ii :: 0 <= ii < |s| ==> s[i.0] >= s[ii]) &&
+    //     (forall ii :: 0 <= ii < |s| ==> ii == i.0 || s[i.1] >= s[ii]) &&
+    //     (forall ii :: 0 <= ii < |s| && ii != i.0 ==> s[i.1] >= s[ii]) &&
+    //     |set ii | 0 <= ii < |s| && s[ii] > s[i.1]| <= 1
 {
     var s := [a.0, a.1, b.0, b.1];
-    var i := find_seq_top_two(s);
+    var i := find_indices_of_top_two(s);
     var m := (s[i.0],s[i.1]);
     assert m.0 == s[i.0] && m.1 == s[i.1];
     m
+}
+
+function top_two(s: seq<int>) : (m:(int,int))
+    requires |s| >= 2
+    ensures m.0 in s
+    ensures m.1 in s
+    ensures m.0 >= m.1
+    ensures
+        var i := find_indices_of_top_two(s);
+        (m.0 == s[i.0]) &&
+        (m.1 == s[i.1]) &&
+        (m.0 == m.1 ==>
+            forall ii :: 0 <= ii < |s| ==> m.0 >= s[ii] && m.1 >= s[ii]) &&
+        (m.0 != m.1 ==>
+            forall ii :: 0 <= ii < |s| ==> m.0 >= s[ii]) &&
+        (m.0 != m.1 ==>
+            forall ii :: 0 <= ii < |s| ==> ii == i.0 || m.1 >= s[ii])
+{
+    var i := find_indices_of_top_two(s);
+    (s[i.0], s[i.1])
 }
 
 // function top_two(s: seq<int>) : (m:(int,int))
