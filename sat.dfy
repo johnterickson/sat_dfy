@@ -18,20 +18,73 @@ datatype Literal =
                 if inverted then val else !val
         }
     }
+
+    function full_eval(vs: map<Variable,bool>) : (b: bool)
+        requires forall c :: c in vars() ==> c in vs
+    {
+        match this {
+            case True => true
+            case False => false
+            case LitVar(v, inverted) =>
+                var val := vs[v];
+                if inverted then val else !val
+        }
+    }
+
+    function vars() : set<Variable>
+    {
+        match this {
+            case True | False => {}
+            case LitVar(v, _) => {v}
+        }
+    }
 }
 
 type Clause = set<Literal>
 type CNF = set<Clause>
+
+function clause_vars(clause: Clause) : (vars: set<Variable>)
+    ensures forall l :: l in clause ==> vars >= l.vars()
+    ensures forall v :: v in vars ==>
+        exists l :: l in clause && v in l.vars()
+{
+    flatten_set(set l | l in clause :: l.vars())
+}
+
+lemma MergedClausesHaveSameVars(c1: Clause, c2: Clause)
+    ensures clause_vars(c1 + c2) == clause_vars(c1) + clause_vars(c2)
+{
+    
+}
 
 function clause_eval(clause: Clause, vs: map<Variable,bool>) : (b: bool)
 {
     exists l :: l in clause && l.eval(vs)
 }
 
+function clause_full_eval(clause: Clause, vs: map<Variable,bool>) : (b: bool)
+    requires vs.Keys >= clause_vars(clause)
+{
+    exists l :: l in clause && l.full_eval(vs)
+}
+
+function cnf_vars(cnf: CNF) : (vars: set<Variable>)
+    ensures forall c :: c in cnf ==> vars >= clause_vars(c)
+    ensures forall v :: v in vars ==>
+        exists c :: c in cnf && v in clause_vars(c)
+{
+    flatten_set(set c | c in cnf :: clause_vars(c))
+}
 
 function cnf_eval(cnf: CNF, vs: map<Variable,bool>) : (b: bool)
 {
     forall c :: c in cnf ==> clause_eval(c, vs)
+}
+
+function cnf_full_eval(cnf: CNF, vs: map<Variable,bool>) : (b: bool)
+    requires vs.Keys >= cnf_vars(cnf)
+{
+    forall c :: c in cnf ==> clause_full_eval(c, vs)
 }
 
 
@@ -112,7 +165,7 @@ datatype Expression =
         ghost var vs: map<Variable, bool> :| true;
         var out := OneEquivalentArbitrary(a, b, vs);
 
-        assert forall m: map<Variable, bool> :: true ==> 
+        assert forall m: map<Variable, bool> :: |m.Keys| >= 0 ==> 
             (
                 ghost var vs: map<Variable, bool> :| vs == m;
                 ghost var out := OneEquivalentArbitrary(a, b, vs);
@@ -150,11 +203,42 @@ datatype Expression =
             this.eval(vs) == other.eval(vs)
     }
 
+    ghost function full_equivalent(other: Expression) : (eq: bool)
+        requires this.Valid()
+        requires other.Valid()
+    {
+        forall vs : map<Variable, bool> :: vs.Keys >= this.all_vars() + other.all_vars() ==>
+            this.full_eval(vs) == other.full_eval(vs)
+    }
+
     ghost function equivalent_cnf(other: CNF) : (eq: bool)
         requires this.Valid()
     {
         forall vs : map<Variable, bool> :: true ==>
             this.eval(vs) == cnf_eval(other, vs)
+    }
+
+    ghost function full_equivalent_cnf(cnf: CNF) : (eq: bool)
+        requires this.Valid()
+    {
+        forall vs : map<Variable, bool> :: vs.Keys >= this.all_vars() + cnf_vars(cnf) ==>
+            this.full_eval(vs) == cnf_full_eval(cnf, vs)
+    }
+
+    lemma also_equivalent_cnf(other: Expression, cnf: CNF)
+        requires this.Valid()
+        requires other.Valid()
+        requires this.equivalent(other)
+        requires this.equivalent_cnf(cnf)
+        ensures other.equivalent_cnf(cnf)
+    {
+        assert forall vs : map<Variable, bool> :: true ==>
+            this.eval(vs) == other.eval(vs);
+        assert forall vs : map<Variable, bool> :: true ==>
+            this.eval(vs) == cnf_eval(cnf, vs);
+        assert forall vs : map<Variable, bool> :: true ==>
+            other.eval(vs) == cnf_eval(cnf, vs);
+        assert other.equivalent_cnf(cnf);
     }
 
     function eval(vs: map<Variable,bool>) : (b: bool)
@@ -283,12 +367,15 @@ datatype Expression =
         requires c == Constant(b)
         ensures n.equivalent(Constant(!b))
     {
-        ghost var m : map<Variable, bool> :| true;
-        assert Not(Constant(b)).eval(m) == Constant(!b).eval(m);
+        assert |map[1 := false].Keys| > 0;
+        ghost var m : map<Variable, bool> :| |m.Keys| > 0;
+        ghost var not_b := !b;
+        assert Not(Constant(b)).eval(m) == Constant(not_b).eval(m);
 
-        assert forall vs : map<Variable, bool> {:trigger true} :: true ==>
+        assert forall vs : map<Variable, bool> :: |vs.Keys| >= 0 ==>
             ghost var m : map<Variable, bool> :| m == vs;
-            Not(Constant(b)).eval(m) == Constant(!b).eval(m)
+            ghost var not_b := !b;
+            Not(Constant(b)).eval(m) == Constant(not_b).eval(m)
         ;
 
         assert Not(Constant(b)).equivalent(Constant(!b));
@@ -299,15 +386,18 @@ datatype Expression =
         requires ve == Var(v, inverted)
         ensures n.equivalent(Var(v, !inverted))
     {
-        ghost var m : map<Variable, bool> :| true;
-        assert Not(Var(v, inverted)).eval(m) == Var(v, !inverted).eval(m);
+        assert |map[1 := 1].Keys| >= 0;
+        ghost var m : map<Variable, bool> :| |m.Keys| >= 0;
+        ghost var not_inverted := !inverted;
+        assert Not(Var(v, inverted)).eval(m) == Var(v, not_inverted).eval(m);
 
-        assert forall vs : map<Variable, bool> {:trigger true} :: true ==>
+        assert forall vs : map<Variable, bool> :: |vs.Keys| >= 0 ==>
             ghost var m : map<Variable, bool> :| m == vs;
-            Not(Var(v, inverted)).eval(m) == Var(v, !inverted).eval(m)
+            ghost var not_inverted := !inverted;
+            Not(Var(v, inverted)).eval(m) == Var(v, not_inverted).eval(m)
         ;
 
-        assert Not(Var(v, inverted)).equivalent(Var(v, !inverted));
+        assert Not(Var(v, inverted)).equivalent(Var(v, not_inverted));
     }
 
     function replace_not() : (out: Expression)
@@ -402,7 +492,7 @@ datatype Expression =
         var out := this.MergeCNF_Arbitrary(a, b, cnf1, cnf2, vs);
         assert this.eval(vs) == cnf_eval(out, vs);
 
-        assert forall m: map<Variable, bool> :: true ==> 
+        assert forall m: map<Variable, bool> :: |m.Keys| >= 0 ==> 
             (
                 ghost var vs: map<Variable, bool> :| vs == m;
                 ghost var out := this.MergeCNF_Arbitrary(a, b, cnf1, cnf2, vs);
@@ -439,12 +529,19 @@ datatype Expression =
         requires Valid()
         ensures this.equivalent_cnf(out)
     {
-        var out := this;
-        var out := out.remove_implies();
-        var out := out.remove_equivalent();
-        var out := out.replace_not();
-        var out := out.distribute();
-        out
+        var out1 := this.remove_implies();
+        assert this.equivalent(out1);
+        var out2 := out1.remove_equivalent();
+        assert out1.equivalent(out2);
+        var out3 := out2.replace_not();
+        assert out2.equivalent(out3);
+        var cnf := out3.distribute();
+        assert out3.equivalent_cnf(cnf);
+        out3.also_equivalent_cnf(out2,cnf);
+        out2.also_equivalent_cnf(out1,cnf);
+        out1.also_equivalent_cnf(this,cnf);
+        assert this.equivalent_cnf(cnf);
+        cnf
     }
 
     function run() : bool
