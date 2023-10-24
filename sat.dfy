@@ -40,8 +40,45 @@ datatype Literal =
     }
 }
 
-type Clause = set<Literal>
+datatype ClauseLit = Inverted(Variable) | NotInverted(Variable)
+{
+    function invert() : ClauseLit {
+        match this {
+            case Inverted(v) => NotInverted(v)
+            case NotInverted(v) => Inverted(v)
+        }
+    }
+
+    function vars() : set<Variable>
+    {
+        match this {
+            case Inverted(v) => {v}
+            case NotInverted(v) => {v}
+        }
+    }
+
+    function eval(vs: map<Variable,bool>) : (b: bool)
+    {
+        match this {
+            case Inverted(v) => if v in vs then !(vs[v]) else true
+            case NotInverted(v) => if v in vs then vs[v] else false
+        }
+    }
+
+    function full_eval(vs: map<Variable,bool>) : (b: bool)
+        requires forall c :: c in vars() ==> c in vs
+    {
+        match this {
+            case Inverted(v) => !(vs[v])
+            case NotInverted(v) => vs[v]
+        }
+    }
+}
+
+type Clause = set<ClauseLit>
 type CNF = set<Clause>
+
+datatype CNFResult = ConstantResult(bool) | VariableResult(CNF)
 
 function clause_vars(clause: Clause) : (vars: set<Variable>)
     ensures forall l :: l in clause ==> vars >= l.vars()
@@ -60,6 +97,12 @@ lemma MergedClausesHaveSameVars(c1: Clause, c2: Clause)
 function clause_eval(clause: Clause, vs: map<Variable,bool>) : (b: bool)
 {
     exists l :: l in clause && l.eval(vs)
+}
+
+ghost function clause_equivalent(c1: Clause, c2: Clause) : (b: bool)
+{
+    forall vs : map<Variable, bool> :: true ==>
+        clause_eval(c1, vs) == clause_eval(c2, vs)
 }
 
 function clause_full_eval(clause: Clause, vs: map<Variable,bool>) : (b: bool)
@@ -249,7 +292,7 @@ datatype Expression =
             case Constant(b) => b
             case Var(v, inverted) =>
                 var val := if v in vs then vs[v] else false;
-                if inverted then val else !val
+                if inverted then !val else val
             case Not(e) => !e.eval(vs)
             case And(a,b) => a.eval(vs) && b.eval(vs)
             case Or(a,b) => a.eval(vs) || b.eval(vs)
@@ -362,6 +405,13 @@ datatype Expression =
         }
     }
 
+    predicate no_constant() {
+        match this {
+            case Constant(_) => false
+            case e => forall c :: c in e.children() ==> c.no_constant()
+        }
+    }
+
     lemma NotConstantIsInvertedConstant(n: Expression, c: Expression, b: bool)
         requires n == Not(c)
         requires c == Constant(b)
@@ -457,25 +507,40 @@ datatype Expression =
         }
     }
 
-    function distribute() : (out: CNF)
+    function distribute() : (out: CNFResult)
         requires this.Valid()
         requires this.no_implies()
         requires this.no_equivalent()
         requires this.no_not()
         decreases this.height()
-        ensures this.equivalent_cnf(out)
+        ensures match out {
+            case ConstantResult(b) => this.equivalent(Constant(b))
+            case VariableResult(cnf) => this.equivalent_cnf(cnf)
+        }
     {
         match this {              
-            case Constant(b) => {{ if b then True else False }}
-            case Var(v, inverted) => {{ LitVar(v, inverted) }}
-            case And(a, b) => a.distribute() + b.distribute()
+            case Constant(b) => ConstantResult(if b then true else false)
+            case Var(v, inverted) =>
+                VariableResult({{ if inverted then Inverted(v) else NotInverted(v) }})
+            case And(a, b) => 
+                match (a.distribute(), b.distribute()) {
+                    case (ConstantResult(a), ConstantResult(b)) => ConstantResult(a && b)
+                    case (ConstantResult(a), VariableResult(b)) => if a then VariableResult(b) else ConstantResult(false)
+                    case (VariableResult(a), ConstantResult(b)) => if b then VariableResult(a) else ConstantResult(false)
+                    case (VariableResult(a), VariableResult(b)) => VariableResult(a + b)
+                }
             case Or(a,b) =>
                 var cnf1 := a.distribute();
                 var cnf2 := b.distribute();
-                MergeCNF(a, b, cnf1, cnf2)
-            case Implies(a,b) => assert false; {{}}
-            case Equivalent(a,b) => assert false; {{}}
-            case Not(x) => assert false; {{}}
+                match (cnf1, cnf2) {
+                    case (ConstantResult(a), ConstantResult(b)) => ConstantResult(a || b)
+                    case (ConstantResult(a), VariableResult(b)) => if a then ConstantResult(true) else VariableResult(b)
+                    case (VariableResult(a), ConstantResult(b)) => if b then ConstantResult(true) else VariableResult(a)
+                    case (VariableResult(cnf1), VariableResult(cnf2)) => VariableResult(MergeCNF(a, b, cnf1, cnf2))
+                }
+            case Implies(a,b) => assert false; ConstantResult(false)
+            case Equivalent(a,b) => assert false; ConstantResult(false)
+            case Not(x) => assert false; ConstantResult(false)
         }
     }
 
@@ -525,9 +590,12 @@ datatype Expression =
         set c1, c2 | c1 in cnf1 && c2 in cnf2 :: c1 + c2
     }
 
-    function make_cnf() : (out: CNF)
+    function make_cnf() : (out: CNFResult)
         requires Valid()
-        ensures this.equivalent_cnf(out)
+        ensures match out {
+            case VariableResult(out) => this.equivalent_cnf(out)
+            case ConstantResult(out) => this.equivalent(Constant(out))
+        }
     {
         var out1 := this.remove_implies();
         assert this.equivalent(out1);
@@ -535,13 +603,19 @@ datatype Expression =
         assert out1.equivalent(out2);
         var out3 := out2.replace_not();
         assert out2.equivalent(out3);
-        var cnf := out3.distribute();
-        assert out3.equivalent_cnf(cnf);
-        out3.also_equivalent_cnf(out2,cnf);
-        out2.also_equivalent_cnf(out1,cnf);
-        out1.also_equivalent_cnf(this,cnf);
-        assert this.equivalent_cnf(cnf);
-        cnf
+        var cnfr := out3.distribute();
+        match cnfr {
+            case ConstantResult(b) =>
+                assert this.equivalent(Constant(b));
+                cnfr
+            case VariableResult(cnf) =>
+                assert out3.equivalent_cnf(cnf);
+                out3.also_equivalent_cnf(out2,cnf);
+                out2.also_equivalent_cnf(out1,cnf);
+                out1.also_equivalent_cnf(this,cnf);
+                assert this.equivalent_cnf(cnf);
+                cnfr
+        }
     }
 
     function run() : bool
