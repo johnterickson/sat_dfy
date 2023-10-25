@@ -2,6 +2,9 @@ include "util.dfy"
 
 // Provably correct SAT solver
 // inspired by https://siddhartha-gadgil.github.io/automating-mathematics/posts/sat-solving/
+module SAT {
+    import opened Util
+
 newtype Variable = int
 datatype Literal = 
     True |
@@ -627,7 +630,4 @@ datatype Expression =
     }
 }
 
-
-
-
-
+}

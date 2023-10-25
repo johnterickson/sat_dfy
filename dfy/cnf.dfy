@@ -3,6 +3,9 @@ include "sat.dfy"
 // Clause: l1 ∨ l2 ∨ ... ∨ ln
 // CNF: C1 ∧ C2 ∧ ... ∧ Cn
 
+module CNF {
+    import opened SAT
+
 function clause_is_tautology(c: Clause) : (out: bool)
     ensures out ==> (
         forall vs: map<Variable,bool> :: true ==> clause_eval(c, vs) == true
@@ -22,4 +25,6 @@ function cnf_remove_tautologies(cnf: CNF) : (out: CNF)
     ensures cnf_equivalent(cnf, out)
 {
     set c | c in cnf && !clause_is_tautology(c)
+}
+
 }
