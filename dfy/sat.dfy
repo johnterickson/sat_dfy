@@ -5,7 +5,7 @@ include "util.dfy"
 module SAT {
     import opened Util
 
-newtype Variable = int
+newtype Variable = x : int | 0 < x witness 1
 datatype Literal = 
     True |
     False |
@@ -43,8 +43,23 @@ datatype Literal =
     }
 }
 
+lemma NumbersBijection(c: Clause, f: (ClauseLit) -> int)
+    requires forall l: ClauseLit :: l in c ==> f(l) == l.number()
+    ensures forall l1: ClauseLit, l2: ClauseLit :: l1 in c && l2 in c && l1 != l2 ==> l1.number() != l2.number()
+{
+
+}
+
 datatype ClauseLit = Inverted(Variable) | NotInverted(Variable)
 {
+    function number() : int
+    {
+        match this {
+            case Inverted(v) => -1 * (v as int)
+            case NotInverted(v) => (v as int)
+        }
+    }
+
     function invert() : ClauseLit {
         match this {
             case Inverted(v) => NotInverted(v)

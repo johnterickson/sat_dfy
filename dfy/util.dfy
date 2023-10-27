@@ -30,4 +30,90 @@ module Util {
     {
         if a >= b then a else b
     }
+
+    
+    lemma EverythingEqualInSetOfOne<T>(s: set<T>, i: T)
+        requires i in s
+        requires |s| == 1
+        ensures forall ii :: ii in s ==> i == ii
+    {
+        var to_check := s;
+        var checked := {};
+        while |to_check| > 0
+            invariant to_check + checked == s
+            invariant forall ii :: ii in checked ==> i == ii
+        {
+            var ii :| ii in to_check;
+
+            to_check := to_check - {ii};
+            checked := checked + {ii};
+        }
+    }
+
+    function extract_only_from_set<T>(s: set<T>) : (out: T)
+        requires |s| == 1
+        ensures {out} == s
+    {
+        assert (
+            ghost var i :| i in s;
+            EverythingEqualInSetOfOne(s, i);
+            forall ii :: ii in s ==> ii == i
+        );
+        var out :| out in s && forall i :: i in s ==> i == out;
+        out
+    }
+
+    lemma ExistsMax<T>(m: map<T,int>)
+        requires |m| > 0
+        requires forall i1, i2 :: i1 in m && i2 in m && i1 != i2 ==> m[i1] != m[i2]
+        ensures exists out :: out in m && forall i :: i in m && i != out ==> m[out] > m[i]
+    {
+        var max_key :| max_key in m.Keys;
+        var max := m[max_key];
+        var to_check := m.Keys - {max_key};
+        var smaller := {};
+        while |to_check| > 0
+            invariant to_check + {max_key} + smaller == m.Keys
+            invariant max == m[max_key]
+            invariant max_key !in smaller
+            invariant max_key !in to_check
+            invariant forall i :: i in smaller ==> max > m[i]
+        {
+            var k :| k in to_check;
+            if m[k] > max {
+                smaller := smaller + { max_key };
+                max_key := k;
+                max := m[k];
+            } else {
+                smaller := smaller + { k };
+            }
+            to_check := to_check - { k };
+        }
+        assert max_key in m;
+        assert forall i :: i in m ==> 
+            if i == max_key then m[max_key] == m[i] else m[max_key] > m[i];
+    }
+
+    function extract_max_from_map<T>(m: map<T,int>) : (out: T)
+        requires |m| > 0
+        requires forall i1, i2 :: i1 in m && i2 in m && i1 != i2 ==> m[i1] != m[i2]
+        ensures out in m
+        ensures forall i :: i in m && i != out ==> m[out] > m[i]
+    {
+        ExistsMax(m);
+        var out :| out in m && forall i :: i in m && i != out ==> m[out] > m[i];
+        out
+    }
+
+    //(int, bool) -> realzz
+    function extract_max_from_set<T>(s: set<T>, f: (T) -> int) : (out: T)
+        requires |s| > 0
+        requires forall i1, i2 :: i1 in s && i2 in s && i1 != i2 ==> f(i1) != f(i2)
+        ensures out in s
+        ensures forall i :: i in s && i != out ==> f(out) > f(i)
+    {
+        var m: map<T,int> := map i | i in s :: f(i);
+        assert s == m.Keys;
+        extract_max_from_map(m)
+    }
 }
