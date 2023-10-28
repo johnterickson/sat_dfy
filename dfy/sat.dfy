@@ -47,7 +47,6 @@ lemma NumbersBijection(c: Clause, f: (ClauseLit) -> int)
     requires forall l: ClauseLit :: l in c ==> f(l) == l.number()
     ensures forall l1: ClauseLit, l2: ClauseLit :: l1 in c && l2 in c && l1 != l2 ==> l1.number() != l2.number()
 {
-
 }
 
 datatype ClauseLit = Inverted(Variable) | NotInverted(Variable)

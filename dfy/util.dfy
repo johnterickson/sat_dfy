@@ -106,7 +106,7 @@ module Util {
     }
 
     //(int, bool) -> realzz
-    function extract_max_from_set<T>(s: set<T>, f: (T) -> int) : (out: T)
+    function extract_max_from_set_by_score<T>(s: set<T>, f: (T) -> int) : (out: T)
         requires |s| > 0
         requires forall i1, i2 :: i1 in s && i2 in s && i1 != i2 ==> f(i1) != f(i2)
         ensures out in s
@@ -115,5 +115,56 @@ module Util {
         var m: map<T,int> := map i | i in s :: f(i);
         assert s == m.Keys;
         extract_max_from_map(m)
+    }
+
+    ghost predicate well_ordered<T(!new)>(s: set<T>, less_than: (T, T) -> bool)
+    {
+        (forall i1 :: i1 in s ==> !less_than(i1,i1)) &&
+        (forall i1, i2 :: i1 in s && i2 in s && less_than(i1,i2) == !less_than(i2,i1)) && 
+        (forall i1, i2, i3 :: i1 in s && i2 in s && i3 in s && less_than(i1,i2) && less_than(i2,i3) ==> less_than(i1,i3))
+    }
+
+    lemma ExistsMaxSorted<T(!new)>(s: set<T>, less_than: (T,T) -> bool)
+        requires |s| > 0
+        requires well_ordered(s, less_than)
+        ensures exists max :: max in s && forall i :: i in s && i != max ==> less_than(i, max)
+    {
+        var max :| max in s;
+        var to_check := s - {max};
+        var smaller := {};
+        while |to_check| > 0
+            invariant to_check + {max} + smaller == s
+            invariant max !in smaller
+            invariant max !in to_check
+            invariant forall i :: i in smaller ==> less_than(i, max)
+        {
+            var k :| k in to_check;
+            if less_than(max, k) {
+                assert forall i :: i in smaller ==> less_than(i, max);
+                assert forall i :: i in smaller ==> less_than(i, k);
+                smaller := smaller + { max };
+                max := k;
+            } else {
+                smaller := smaller + { k };
+            }
+            to_check := to_check - { k };
+        }
+
+        assert {max} + smaller == s;
+        assert forall i :: i in s && i != max ==> less_than(i, max);
+    }
+
+    function extract_max_from_set_by_order<T(!new)>(s: set<T>, less_than: (T,T) -> bool) : (out: T)
+        requires |s| > 0
+        requires well_ordered(s, less_than)
+        ensures out in s
+        ensures forall i :: i in s && i != out ==> less_than(i, out)
+    {
+        if |s| == 1 then
+            extract_only_from_set(s)
+        else
+            ExistsMaxSorted(s, less_than);
+            var max :| max in s && (forall j :: j in s && j != max ==> less_than(j,max));
+            max
     }
 }
