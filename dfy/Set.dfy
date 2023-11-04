@@ -1,5 +1,6 @@
-
-module Util {
+module Set {
+    import opened Seq
+    
     function flatten_set<T(!new)>(nested: set<set<T>>) : (f: set<T>)
         ensures forall n :: n in nested ==> 
         (
@@ -47,38 +48,6 @@ module Util {
         }
     }
 
-    ghost function map_vals_to_multiset<K,V>(m: map<K,V>) : (out: multiset<V>)
-    {
-        if |m| == 0 
-        then multiset([])
-        else 
-            var k := map_pick(m);
-            multiset([m[k]]) + map_vals_to_multiset(m - {k})
-    }
-
-    ghost function map_vals_to_seq_spec<K,V>(m: map<K,V>) : (out: seq<V>)
-        ensures map_vals_to_multiset(m) == multiset(out)
-    {
-        if |m| == 0 
-        then [] 
-        else 
-            var k := map_pick(m);
-            [m[k]] + map_vals_to_seq_spec(m - {k})
-    }
-
-    method map_vals_to_seq<K,V>(m: map<K,V>) returns (out: seq<V>)
-        decreases m
-        ensures multiset(out) == multiset(map_vals_to_seq_spec(m))
-    {
-        if |m| == 0 {
-            out := [];
-        } else {
-            var x :| x in m;
-            var remaining := map_vals_to_seq(m - {x});
-            out := [m[x]] + remaining;
-        }
-    }
-
     lemma SetSingleton<T>(s: set<T>, x: T)    
         requires |s| == 1 && x in s
         ensures s == {x}
@@ -102,23 +71,6 @@ module Util {
             x
     }
 
-    ghost function map_pick<K,V>(m: map<K,V>) : (x: K)
-        requires |m| != 0
-        ensures x in m && x in m.Keys && m[x] in m.Values
-    {
-        var x :| x in m; x
-    }
-
-    function seq_sum(s: seq<int>) : (sum: int)
-    {
-        if s == [] then
-            0
-        else
-            var x := s[0];
-            var remaining := s[1..];
-            x + seq_sum(remaining)
-    }
-
     lemma MultiSetAdd(s1: multiset<int>, s2: multiset<int>, add: int)
         requires s1 + multiset([add]) == s2 + multiset([add])
         ensures s1 == s2
@@ -131,71 +83,8 @@ module Util {
         assert s2 == removed2;
     }
 
-    lemma SeqPartsSameSum(s: seq<int>, s1: seq<int>, s2: seq<int>)
-        requires s == s1 + s2
-        ensures seq_sum(s) == seq_sum(s1) + seq_sum(s2)
-    {
-        if s == [] {
-            assert s1 == [];
-            assert s2 == [];
-        } else if s1 == [] {
-            assert s2 == s;
-        } else {
-            var x := s1[0];
-            var s1' := s1[1..];
-            assert s == [x] + s1' + s2;
-            SeqPartsSameSum(s[1..], s1[1..], s2);
-        }
-    }
-
-    lemma DifferentPermutationSameSum(s1: seq<int>, s2: seq<int>)
-        requires multiset(s1) == multiset(s2)
-        ensures seq_sum(s1) == seq_sum(s2)
-    {
-        if s1 == [] {
-            assert s2 == [];
-        } else {
-            var x :| x in s1;
-            assert x in s1;
-            assert multiset(s1)[x] > 0;
-            assert multiset(s2)[x] > 0;
-            assert x in s2;
-            var i1, i2 :| 0 <= i1 < |s1| && 0 <= i2 < |s2| && s1[i1] == s2[i2] && s1[i1] == x;
-
-            var remaining1 := s1[..i1] + s1[i1+1..];
-            assert s1 == s1[..i1] + s1[i1..];
-            assert s1 == s1[..i1] + [x] + s1[i1+1..];
-            assert seq_sum(s1) == seq_sum(s1[..i1] + [x] + s1[i1+1..]);
-            SeqPartsSameSum(s1[..i1+1], s1[..i1], [x]);
-            SeqPartsSameSum(s1, s1[..i1+1], s1[i1+1..]);
-            assert seq_sum(s1) == seq_sum(s1[..i1]) + x + seq_sum(s1[i1+1..]);
-            SeqPartsSameSum(remaining1, s1[..i1], s1[i1+1..]);
-            assert multiset(s1) == multiset(remaining1 + [x]);
-            assert seq_sum(s1) == seq_sum(remaining1) + x;
-            assert multiset(s1) == multiset(remaining1) + multiset([x]);
-            assert multiset(s1) - multiset([x]) == multiset(remaining1);
-
-            var remaining2 := s2[..i2] + s2[i2+1..];
-            assert s2 == s2[..i2] + s2[i2..];
-            assert s2 == s2[..i2] + [x] + s2[i2+1..];
-            assert seq_sum(s2) == seq_sum(s2[..i2] + [x] + s2[i2+1..]);
-            SeqPartsSameSum(s2[..i2+1], s2[..i2], [x]);
-            SeqPartsSameSum(s2, s2[..i2+1], s2[i2+1..]);
-            assert seq_sum(s2) == seq_sum(s2[..i2]) + x + seq_sum(s2[i2+1..]);
-            SeqPartsSameSum(remaining2, s2[..i2], s2[i2+1..]);
-            assert multiset(s2) == multiset(remaining2 + [x]);
-            assert seq_sum(s2) == seq_sum(remaining2) + x;
-            assert multiset(s2) == multiset(remaining2) + multiset([x]);
-            assert multiset(s2) - multiset([x]) == multiset(remaining2);
-
-            DifferentPermutationSameSum(remaining1, remaining2);
-            assert seq_sum(remaining1) == seq_sum(remaining2);
-            assert seq_sum(s1) == seq_sum(s2);
-        }
-    }
-
     ghost function set_sum_spec(s: set<int>) : (sum: int)
-        ensures seq_sum(set_to_seq_spec(s)) == sum
+        ensures Seq.seq_sum(set_to_seq_spec(s)) == sum
         ensures (forall i :: i in s ==> i >= 0) ==> sum >= 0
     {
         if s == {} then
@@ -203,7 +92,7 @@ module Util {
         else if |s| == 1 then
             var x := set_pick(s);
             assert set_to_seq_spec(s) == [x];
-            assert seq_sum(set_to_seq_spec(s)) == x;
+            assert Seq.seq_sum(set_to_seq_spec(s)) == x;
             x
         else
             var x := set_pick(s);
@@ -233,20 +122,6 @@ module Util {
         assert set_sum_spec({1}) == 1;
         assert set_sum_spec({1,2}) == 3;
         assert set_sum_spec({1,2,3}) == 6;
-    }
-
-
-    ghost function map_sum_spec<T>(m: map<T,int>) : (sum: int)
-        ensures seq_sum(map_vals_to_seq_spec(m)) == sum
-    {
-        if |m| == 0 then
-            0
-        else if |m| == 1 then
-            var x := map_pick(m);
-            m[x]
-        else
-            var x := map_pick(m);
-            m[x] + map_sum_spec(m - {x})
     }
 
     // lemma NonNegativesSumToNonNegative(s: set<int>)
@@ -312,32 +187,7 @@ module Util {
     //         assert set_sum(s1 + s2) == set_sum(s1) - x + set_sum(s2) + set_sum({x});
     //         assert set_sum(s1 + s2) == set_sum(s1) - x + set_sum(s2) + x;
     //     }
-    // }
-
-    function map_sum<T>(m: map<T,int>) : (sum: int)
-        decreases |m|
-        ensures sum == map_sum_spec(m)
-    {
-        if |m| == 0 then
-            0
-        else
-            var x := map_pick(m);
-            m[x] + map_sum_spec(m - {x})
-    }
-    by method
-    {
-        var ss := map_vals_to_seq(m);
-        DifferentPermutationSameSum(ss, map_vals_to_seq_spec(m));
-        sum := seq_sum(ss);
-    }
-
-    function max(a: int, b: int) : (m: int)
-        ensures m >= a
-        ensures m >= b
-        ensures m == a || m == b
-    {
-        if a >= b then a else b
-    }
+    // 
 
     
     lemma EverythingEqualInSetOfOne<T>(s: set<T>, i: T)

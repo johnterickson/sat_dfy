@@ -1,8 +1,10 @@
-include "util.dfy"
+include "Set.dfy"
+include "Util.dfy"
 
 // Provably correct SAT solver
 // inspired by https://siddhartha-gadgil.github.io/automating-mathematics/posts/sat-solving/
 module SAT {
+    import opened Set
     import opened Util
 
 newtype Variable = x : int | 0 < x witness 1

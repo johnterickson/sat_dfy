@@ -1,5 +1,5 @@
 
-objects = dfy/util.cs dfy/sat.cs dfy/cnf.cs
+objects = dfy/Util.cs dfy/SAT.cs dfy/CNF.cs dfy/Set.cs dfy/Map.cs dfy/Seq.cs
 all: $(objects)
 
 dfy/%.cs: dfy/%.dfy

@@ -1,4 +1,4 @@
-include "sat.dfy"
+import "SAT.dfy"
 
 // Clause: l1 ∨ l2 ∨ ... ∨ ln
 // CNF: C1 ∧ C2 ∧ ... ∧ Cn
