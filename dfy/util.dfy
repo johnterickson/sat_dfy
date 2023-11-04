@@ -23,7 +23,7 @@ module Util {
         set x, y | y in nested && x in y :: x
     }
 
-    ghost function set_to_seq_spec(s:set<int>) : (out: seq<int>)
+    ghost function set_to_seq_spec<T>(s:set<T>) : (out: seq<T>)
         ensures multiset(s) == multiset(out)
     {
         if s == {} 
@@ -32,8 +32,8 @@ module Util {
             var x := set_pick(s);
             [x] + set_to_seq_spec(s - {x})
     }
-
-    method set_to_seq(s:set<int>) returns (out: seq<int>)
+    
+    method set_to_seq<T>(s:set<T>) returns (out: seq<T>)
         decreases s
         ensures multiset(s) == multiset(out)
         ensures multiset(out) == multiset(set_to_seq_spec(s))
@@ -47,10 +47,66 @@ module Util {
         }
     }
 
-    ghost function set_pick(s: set<int>) : (x: int)
-        requires s != {}
+    ghost function map_vals_to_multiset<K,V>(m: map<K,V>) : (out: multiset<V>)
     {
-        var x :| x in s; x
+        if |m| == 0 
+        then multiset([])
+        else 
+            var k := map_pick(m);
+            multiset([m[k]]) + map_vals_to_multiset(m - {k})
+    }
+
+    ghost function map_vals_to_seq_spec<K,V>(m: map<K,V>) : (out: seq<V>)
+        ensures map_vals_to_multiset(m) == multiset(out)
+    {
+        if |m| == 0 
+        then [] 
+        else 
+            var k := map_pick(m);
+            [m[k]] + map_vals_to_seq_spec(m - {k})
+    }
+
+    method map_vals_to_seq<K,V>(m: map<K,V>) returns (out: seq<V>)
+        decreases m
+        ensures multiset(out) == multiset(map_vals_to_seq_spec(m))
+    {
+        if |m| == 0 {
+            out := [];
+        } else {
+            var x :| x in m;
+            var remaining := map_vals_to_seq(m - {x});
+            out := [m[x]] + remaining;
+        }
+    }
+
+    lemma SetSingleton<T>(s: set<T>, x: T)    
+        requires |s| == 1 && x in s
+        ensures s == {x}
+    {
+        var i :| i in s;
+        var remaining := s - {i};
+        assert |s| > |remaining|;
+        assert remaining > {} ==> |s| > 1;
+    }
+
+    ghost function set_pick<T>(s: set<T>) : (x: T)
+        requires s != {}
+        ensures x in s
+        ensures s == {x} ==> |s| == 1
+        ensures |s| == 1 ==> s == {x}
+    {
+        var x :| x in s;
+        if |s| == 1 then
+            SetSingleton(s, x); x
+        else 
+            x
+    }
+
+    ghost function map_pick<K,V>(m: map<K,V>) : (x: K)
+        requires |m| != 0
+        ensures x in m && x in m.Keys && m[x] in m.Values
+    {
+        var x :| x in m; x
     }
 
     function seq_sum(s: seq<int>) : (sum: int)
@@ -140,6 +196,23 @@ module Util {
 
     ghost function set_sum_spec(s: set<int>) : (sum: int)
         ensures seq_sum(set_to_seq_spec(s)) == sum
+        ensures (forall i :: i in s ==> i >= 0) ==> sum >= 0
+    {
+        if s == {} then
+            0
+        else if |s| == 1 then
+            var x := set_pick(s);
+            assert set_to_seq_spec(s) == [x];
+            assert seq_sum(set_to_seq_spec(s)) == x;
+            x
+        else
+            var x := set_pick(s);
+            x + set_sum_spec(s - {x})
+    }
+
+    function set_sum(s: set<int>) : (sum: int)
+        decreases |s|
+        ensures sum == set_sum_spec(s)
     {
         if s == {} then
             0
@@ -147,10 +220,7 @@ module Util {
             var x := set_pick(s);
             x + set_sum_spec(s - {x})
     }
-
-    method set_sum(s: set<int>) returns (sum: int)
-        decreases |s|
-        ensures sum == set_sum_spec(s)
+    by method
     {
         var ss := set_to_seq(s);
         DifferentPermutationSameSum(ss, set_to_seq_spec(s));
@@ -163,6 +233,102 @@ module Util {
         assert set_sum_spec({1}) == 1;
         assert set_sum_spec({1,2}) == 3;
         assert set_sum_spec({1,2,3}) == 6;
+    }
+
+
+    ghost function map_sum_spec<T>(m: map<T,int>) : (sum: int)
+        ensures seq_sum(map_vals_to_seq_spec(m)) == sum
+    {
+        if |m| == 0 then
+            0
+        else if |m| == 1 then
+            var x := map_pick(m);
+            m[x]
+        else
+            var x := map_pick(m);
+            m[x] + map_sum_spec(m - {x})
+    }
+
+    // lemma NonNegativesSumToNonNegative(s: set<int>)
+    //     ensures (forall i :: i in s ==> i >= 0) ==> set_sum(s) >= 0
+    //     {}
+
+    // lemma AddDisjointAdds(s: set<int>, x: int)
+    //     requires x !in s
+    //     decreases |s|
+    //     ensures set_sum_spec(s + {x}) == set_sum_spec(s) + x
+    // {
+    //     if |s| == 0 {
+    //         assert set_sum_spec(s + {x}) == set_sum_spec(s) + x;
+    //     } else {
+    //         var y :| y in s;
+    //         assert y in s;
+    //         assert y !in {x};
+    //         assert s + {x} == {y} + (s - {y}) + {x};
+    //         AddDisjointAdds(s - {y}, x);
+    //         assert set_sum_spec((s - {y}) + {x}) == set_sum_spec(s - {y}) + x;
+    //         assert set_sum_spec(s - {x})
+
+    //         assert set_sum_spec(s + {x}) == set_sum_spec({y} + (s - {y}) + {x});
+    //         assert set_sum_spec(s + {x}) == set_sum_spec({y}) + set_sum_spec(s - {y}) + set_sum_spec({x});
+    //         assert set_sum_spec(s + {x}) == y + set_sum_spec(s - {y}) + x;
+    //         assert set_sum_spec(s + {x}) == set_sum_spec(s) + x;
+    //     }
+    // }
+
+    // lemma DisjointSubsetsSum(s1: set<int>, s2: set<int>)
+    //     requires s1 * s2 == {}
+    //     decreases |s2|, |s1|
+    //     ensures set_sum(s1 + s2) == set_sum(s1) + set_sum(s2)
+    // {
+    //     if |s1| == 0 || |s2| == 0 {
+    //         assert set_sum(s1 + s2) == set_sum(s1) + set_sum(s2);
+    //     } else if |s2| == 1 {
+    //         var x := set_pick(s2);
+    //         assert x == set_sum(s2);
+    //         assert x !in s1;
+    //         AddDisjointAdds(s1, x);
+    //         assert set_sum(s1 + {x}) == set_sum(s1) + x;
+    //         assume false;
+    //         assert set_sum(s1 + s2) == set_sum(s1) + set_sum(s2);
+    //     } else {
+    //         var x :| x in s1;
+    //         assert x in s1 && s1 * s2 == {};
+    //         assert x in s2 ==> s1 * s2 >= {x};
+    //         assert x !in s2;
+    //         DisjointSubsetsSum(s1 - {x}, {x});
+    //         assert set_sum(s1 - {x} + {x}) == set_sum(s1 - {x}) + set_sum({x});
+    //         assert (s1 - {x}) + {x} == s1;
+    //         assert set_sum(s1) == set_sum(s1 - {x}) + set_sum({x});
+    //         assert set_sum(s1) == set_sum(s1 - {x}) + x;
+    //         DisjointSubsetsSum(s1 - {x}, s2);
+    //         assert set_sum((s1 - {x}) + s2) == set_sum(s1 - {x}) + set_sum(s2);
+    //         assert set_sum((s1 - {x}) + s2) == set_sum(s1) - x + set_sum(s2);
+    //         assert ((s1 - {x}) + s2) + {x} == s1 + s2;
+    //         assert ((s1 - {x}) + s2) * {x} == {};
+    //         DisjointSubsetsSum(((s1 - {x}) + s2), {x});
+    //         assert set_sum(((s1 - {x}) + s2) + {x}) == set_sum((s1 - {x}) + s2) + set_sum({x});
+    //         assert set_sum(s1 + s2) == set_sum((s1 - {x}) + s2) + set_sum({x});
+    //         assert set_sum(s1 + s2) == set_sum(s1) - x + set_sum(s2) + set_sum({x});
+    //         assert set_sum(s1 + s2) == set_sum(s1) - x + set_sum(s2) + x;
+    //     }
+    // }
+
+    function map_sum<T>(m: map<T,int>) : (sum: int)
+        decreases |m|
+        ensures sum == map_sum_spec(m)
+    {
+        if |m| == 0 then
+            0
+        else
+            var x := map_pick(m);
+            m[x] + map_sum_spec(m - {x})
+    }
+    by method
+    {
+        var ss := map_vals_to_seq(m);
+        DifferentPermutationSameSum(ss, map_vals_to_seq_spec(m));
+        sum := seq_sum(ss);
     }
 
     function max(a: int, b: int) : (m: int)
